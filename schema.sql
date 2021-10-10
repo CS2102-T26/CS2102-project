@@ -1,18 +1,17 @@
 CREATE TABLE Employees (
     eid INTEGER,
-    did INTEGER,
     ename TEXT,
     email TEXT UNIQUE,
     resign_date DATE,
-    contact1 INTEGER,
-    contact2 INTEGER,
-    contact3 INTEGER,
+    home_number INTEGER,
+    mobile_number INTEGER,
+    office_number INTEGER,
     PRIMARY KEY (eid)
 );
 
 CREATE TABLE WorksIn (
     eid INTEGER, 
-    did INTEGER NOT NULL, 
+    did INTEGER, 
     PRIMARY KEY (eid, did),
     FOREIGN KEY (eid) REFERENCES Employees,
     FOREIGN KEY (did) REFERENCES Departments
@@ -69,14 +68,16 @@ CREATE TABLE Updates (
     new_cap INTEGER,
     room INTEGER,
     floor INTEGER,
-    PRIMARY KEY date
+    PRIMARY KEY (eid, date, room, floor),
+    FOREIGN KEY (eid) REFERENCES Managers,
+    FOREIGN KEY (room, floor) REFERENCES MeetingRooms
 );
 
 CREATE TABLE HealthDeclaration (
     date DATE,
     temp NUMERIC,
     eid INTEGER,
-    PRIMARY KEY date,
+    PRIMARY KEY (eid, date),
     FOREIGN KEY (eid) REFERENCES Employees
 );
 
