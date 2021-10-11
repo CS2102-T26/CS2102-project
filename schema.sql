@@ -24,19 +24,18 @@ CREATE TABLE Departments (
 );
 
 CREATE TABLE MeetingRooms (
-    room INTEGER,
     floor INTEGER,
+    room INTEGER,
     rname TEXT,
-    capacity INTEGER,
-    PRIMARY KEY (room, floor)
+    PRIMARY KEY (floor, room)
 );
 
 CREATE TABLE LocatedIn (
-    room INTEGER,
     floor INTEGER,
+    room INTEGER,
     did INTEGER NOT NULL,
-    PRIMARY KEY (room, floor),
-    FOREIGN KEY(room, floor) REFERENCES MeetingRooms,
+    PRIMARY KEY (floor, room),
+    FOREIGN KEY(floor, room) REFERENCES MeetingRooms,
     FOREIGN KEY (did) REFERENCES Departments
 );
 
@@ -68,11 +67,11 @@ CREATE TABLE Updates (
     eid INTEGER,
     date DATE,
     new_cap INTEGER,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Managers,
-    FOREIGN KEY (room, floor) REFERENCES MeetingRooms
+    FOREIGN KEY (floor, room) REFERENCES MeetingRooms
 );
 
 CREATE TABLE HealthDeclaration (
@@ -86,40 +85,40 @@ CREATE TABLE HealthDeclaration (
 CREATE TABLE Sessions (
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (time, date, room, floor)
+    room INTEGER,
+    PRIMARY KEY (time, date, floor, room)
 );
 
 CREATE TABLE Joins (
     eid INTEGER,
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, time, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Employees,
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions
+    FOREIGN KEY (time, date, floor, room) REFERENCES Sessions
 );
 
 CREATE TABLE Books (
     eid INTEGER,
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, time, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Bookers,
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions
+    FOREIGN KEY (time, date, floor, room) REFERENCES Sessions
 );
 
 CREATE TABLE Approves (
     eid INTEGER,
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, time, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Managers,
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions
+    FOREIGN KEY (time, date, floor, room) REFERENCES Sessions
 );
