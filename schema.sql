@@ -34,7 +34,8 @@ CREATE TABLE LocatedIn (
     room INTEGER,
     floor INTEGER,
     did INTEGER NOT NULL,
-    PRIMARY KEY (room, floor) REFERENCES MeetingRooms,
+    PRIMARY KEY (room, floor),
+    FOREIGN KEY(rooom, floor) REFERENCES MeetingRooms,
     FOREIGN KEY (did) REFERENCES Departments
 );
 
@@ -109,7 +110,7 @@ CREATE TABLE Books (
     PRIMARY KEY (eid, time, date, room, floor),
     FOREIGN KEY (eid) REFERENCES Bookers,
     FOREIGN KEY (time, date, room, floor) REFERENCES Sessions
-)
+);
 
 CREATE TABLE Approves (
     eid INTEGER,
@@ -120,4 +121,4 @@ CREATE TABLE Approves (
     PRIMARY KEY (eid, time, date, room, floor),
     FOREIGN KEY (eid) REFERENCES Managers,
     FOREIGN KEY (time, date, room, floor) REFERENCES Sessions
-)
+);
