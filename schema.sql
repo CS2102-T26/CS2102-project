@@ -27,6 +27,7 @@ CREATE TABLE MeetingRooms (
     room INTEGER,
     floor INTEGER,
     rname TEXT,
+    capacity INTEGER,
     PRIMARY KEY (room, floor)
 );
 
@@ -35,7 +36,7 @@ CREATE TABLE LocatedIn (
     floor INTEGER,
     did INTEGER NOT NULL,
     PRIMARY KEY (room, floor),
-    FOREIGN KEY(rooom, floor) REFERENCES MeetingRooms,
+    FOREIGN KEY(room, floor) REFERENCES MeetingRooms,
     FOREIGN KEY (did) REFERENCES Departments
 );
 
