@@ -1,7 +1,9 @@
 -- insert into departments values (1, 'HR'), (2, 'LOGS'), (3, 'HR'), (4, 'ADMIN');
+-- insert into departments values (1, 'HR'), (2, 'LOGS'), (3, 'HR'), (4, 'ADMIN');
+
+
 -- psql -d cs2102_tp -U postgres -f C:\Users\lezon\cs2102_tp\CS2102-project/schema.sql
-
-
+-- DROP TABLE Employees, WorksIn, Departments, MeetingRooms, LocatedIn, Juniors, Bookers, Seniors, Managers, Updates, HealthDeclaration, Sessions, Joins, Books, Approves;
 -- BASIC add_department
 CREATE OR REPLACE PROCEDURE add_department 
     (did INTEGER, dname TEXT)
@@ -25,12 +27,29 @@ $$ LANGUAGE plpgsql;
 
 --BASIC add_room
 CREATE OR REPLACE PROCEDURE add_room
-    (floor INTEGER, room INTEGER, rname TEXT, capacity INTEGER)
+    (floor INTEGER, room INTEGER, rname TEXT, new_cap INTEGER, eid INTEGER, date DATE)
 AS $$
-    INSERT INTO MeetingRooms (floor, room, rname)
-    VALUES (floor, room, rname);
+    DECLARE
+        added_date DATE := '1999-12-07';
+        added_eid INTEGER := 0;
+    BEGIN
+        INSERT INTO MeetingRooms (floor, room, rname)
+        VALUES (floor, room, rname);
+        IF date IS NULL THEN date := added_date;
+        END IF;
+        IF eid IS NULL THEN eid := added_eid;
+        END IF;
+        INSERT INTO Updates (eid, date,new_cap, floor, room)
+        VALUES (eid, date, new_cap, floor, room);
+        
+    END;
+$$ LANGUAGE plpgsql;
 
-    INSERT INTO Updates (eid, date, new_cap, floor, room)
-    VALUES (null, null, capacity, floor, room);
-
+--CORE join_meeting
+CREATE OR REPLACE PROCEDURE join_meeting
+    (floor INTEGER, room INTEGER, date DATE, start_time TIME, eid INTEGER)
+AS $$
+    INSERT INTO Joins (eid, time, date, floor, room)
+    VALUES (eid, start_time, date, floor, room)
 $$ LANGUAGE sql;
+
