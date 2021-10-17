@@ -3,7 +3,8 @@
 
 
 -- psql -d cs2102_tp -U postgres -f C:\Users\lezon\cs2102_tp\CS2102-project/schema.sql
--- DROP TABLE Employees, WorksIn, Departments, MeetingRooms, LocatedIn, Juniors, Bookers, Seniors, Managers, Updates, HealthDeclaration, Sessions, Joins, Books, Approves;
+-- DROP VIEW fever;
+-- DROP TABLE WorksIn, MeetingRooms, LocatedIn, Employees, Departments, Juniors, Bookers, Seniors, Managers, Updates, HealthDeclaration, Sessions, Joins, Books, Approves;
 -- BASIC add_department
 CREATE OR REPLACE PROCEDURE add_department 
     (did INTEGER, dname TEXT)
@@ -39,13 +40,16 @@ AS $$
         END IF;
         IF eid IS NULL THEN eid := added_eid;
         END IF;
-        INSERT INTO Updates (eid, date,new_cap, floor, room)
+        INSERT INTO Updates (eid, date, new_cap, floor, room)
         VALUES (eid, date, new_cap, floor, room);
         
     END;
 $$ LANGUAGE plpgsql;
+-- call add_room(11,1,'Store', 5, null,null);
+
 
 --CORE join_meeting
+-- no end_time 
 CREATE OR REPLACE PROCEDURE join_meeting
     (floor INTEGER, room INTEGER, date DATE, start_time TIME, eid INTEGER)
 AS $$
