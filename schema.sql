@@ -3,9 +3,9 @@ CREATE TABLE Employees (
     ename TEXT,
     email TEXT UNIQUE NOT NULL, -- c2, c3
     resign_date DATE, -- c3 (date is NULL if active), c33 use soft delete
-    home_number INTEGER,
-    mobile_number INTEGER,
-    office_number INTEGER,
+    home_number VARCHAR(15),
+    mobile_number VARCHAR(15),
+    office_number VARCHAR(15),
     PRIMARY KEY (eid) -- c1
 );
 
@@ -27,7 +27,6 @@ CREATE TABLE MeetingRooms (
     room INTEGER,
     floor INTEGER,
     rname TEXT NOT NULL, -- c7
-    capacity INTEGER,
     PRIMARY KEY (room, floor) -- c6
 );
 
@@ -143,7 +142,7 @@ CREATE TABLE Approves (
     PRIMARY KEY (time, date, room, floor), -- c22 remove eid so meeting only approved once
     FOREIGN KEY (eid) REFERENCES Managers,
     FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c25 need verify syntax
+    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c27 need verify syntax
 );
 
 -- NEED TO DO CONTACT TRACING LATER
