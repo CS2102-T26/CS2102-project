@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS Employees, WorksIn, Departments, MeetingRooms, LocatedIn, Juniors, 
+Bookers, Seniors, Managers, Updates, HealthDeclaration, Sessions, Joins, Books, Approves CASCADE;
+
 CREATE TABLE Employees (
     eid INTEGER,
     ename TEXT,
@@ -9,18 +12,18 @@ CREATE TABLE Employees (
     PRIMARY KEY (eid) -- c1
 );
 
+CREATE TABLE Departments (
+    did INTEGER,
+    dname TEXT NOT NULL, -- c5
+    PRIMARY KEY (did) -- c4
+);
+
 CREATE TABLE WorksIn (
     eid INTEGER, 
     did INTEGER NOT NULL, -- c8 
     PRIMARY KEY (eid), 
     FOREIGN KEY (eid) REFERENCES Employees,
     FOREIGN KEY (did) REFERENCES Departments -- c9
-);
-
-CREATE TABLE Departments (
-    did INTEGER,
-    dname TEXT NOT NULL, -- c5
-    PRIMARY KEY (did) -- c4
 );
 
 CREATE TABLE MeetingRooms (

@@ -20,7 +20,6 @@ insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15',
 insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 21, 4, 3);
 insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 8, 4, 4);
 insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 14, 4, 5);
-insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 11, 1, 6);
 insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 16, 5, 1);
 insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 10, 5, 2);
 insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 16, 5, 3);
