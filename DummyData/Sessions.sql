@@ -5,7 +5,6 @@ insert into Sessions (time, date, floor, room) values ('13:00:00', '2021-10-19',
 insert into Sessions (time, date, floor, room) values ('10:00:00', '2021-10-16', 4, 5);
 insert into Sessions (time, date, floor, room) values ('15:00:00', '2021-10-22', 1, 1);
 insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-20', 4, 3);
-insert into Sessions (time, date, floor, room) values ('10:00:00', '2021-10-17', 5, 5);
 insert into Sessions (time, date, floor, room) values ('13:00:00', '2021-10-22', 1, 2);
 insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-23', 3, 1);
 insert into Sessions (time, date, floor, room) values ('11:00:00', '2021-10-24', 4, 5);
@@ -32,7 +31,6 @@ insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-16',
 insert into Sessions (time, date, floor, room) values ('11:00:00', '2021-10-17', 3, 3);
 insert into Sessions (time, date, floor, room) values ('13:00:00', '2021-10-22', 3, 1);
 insert into Sessions (time, date, floor, room) values ('10:00:00', '2021-10-21', 5, 4);
-insert into Sessions (time, date, floor, room) values ('10:00:00', '2021-10-17', 5, 5);
 insert into Sessions (time, date, floor, room) values ('15:00:00', '2021-10-16', 1, 4);
 insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-18', 2, 3);
 insert into Sessions (time, date, floor, room) values ('12:00:00', '2021-10-21', 2, 4);
