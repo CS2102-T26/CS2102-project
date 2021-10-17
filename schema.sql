@@ -112,7 +112,7 @@ CREATE TABLE Joins (
     PRIMARY KEY (eid, time, date, room, floor),
     FOREIGN KEY (eid) REFERENCES Employees,
     FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c26 need verify syntax from psql docs
+    CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c26 need verify syntax from psql docs
 );
 
 CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, senior, manager
@@ -127,7 +127,7 @@ CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, seni
     PRIMARY KEY (eid, time, date, room, floor),
     FOREIGN KEY (eid) REFERENCES Bookers,
     FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c25 need verify syntax
+    CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c25 need verify syntax
 );
 
 CREATE TABLE Approves ( 
@@ -142,7 +142,7 @@ CREATE TABLE Approves (
     PRIMARY KEY (time, date, room, floor), -- c22 remove eid so meeting only approved once
     FOREIGN KEY (eid) REFERENCES Managers,
     FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c27 need verify syntax
+    CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c27 need verify syntax
 );
 
 -- NEED TO DO CONTACT TRACING LATER
