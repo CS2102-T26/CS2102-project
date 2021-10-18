@@ -12,7 +12,6 @@ CREATE TABLE Employees (
 INSERT INTO Employees VALUES (0, 'admin', 'admin', null, null, null, null);
 INSERT INTO Bookers VALUES (0);
 INSERT INTO Managers VALUES (0);
-INSERT INTO MeetingRooms VALUES (11,1,'store');
 
 
 CREATE TABLE Managers ( -- c12, need trigger to ensure inserted employee is not senior or junior

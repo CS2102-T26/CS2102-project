@@ -30,20 +30,16 @@ CREATE TABLE MeetingRooms (
     floor INTEGER,
     room INTEGER,
     rname TEXT NOT NULL, -- c7
-<<<<<<< HEAD
     -- capacity INTEGER,
     PRIMARY KEY (floor, room) -- c6
-=======
-    PRIMARY KEY (room, floor) -- c6
->>>>>>> upstream/main
 );
 
 CREATE TABLE LocatedIn (
     floor INTEGER,
     room INTEGER,
     did INTEGER NOT NULL,
-    PRIMARY KEY (room, floor), -- c10, each room, floor can only belong to one did
-    FOREIGN KEY(room, floor) REFERENCES MeetingRooms,
+    PRIMARY KEY (floor, room), -- c10, each room, floor can only belong to one did
+    FOREIGN KEY(floor, room) REFERENCES MeetingRooms,
     FOREIGN KEY (did) REFERENCES Departments -- c11
 );
 
@@ -119,13 +115,8 @@ CREATE TABLE Joins (
     room INTEGER,
     PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Employees,
-<<<<<<< HEAD
     FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c26 need verify syntax from psql docs
-=======
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c26 need verify syntax from psql docs
->>>>>>> upstream/main
 );
 
 CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, senior, manager
@@ -139,13 +130,8 @@ CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, seni
     room INTEGER,
     PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Bookers,
-<<<<<<< HEAD
     FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c25 need verify syntax
-=======
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c25 need verify syntax
->>>>>>> upstream/main
 );
 
 CREATE TABLE Approves ( 
@@ -159,13 +145,8 @@ CREATE TABLE Approves (
     room INTEGER,
     PRIMARY KEY (time, date, floor, room), -- c22 remove eid so meeting only approved once
     FOREIGN KEY (eid) REFERENCES Managers,
-<<<<<<< HEAD
     FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
-    CHECK (date > CURRENT_DATE AND time > CURRENT_TIME) -- c25 need verify syntax
-=======
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c27 need verify syntax
->>>>>>> upstream/main
 );
 
 -- NEED TO DO CONTACT TRACING LATER
