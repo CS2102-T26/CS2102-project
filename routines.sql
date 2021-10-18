@@ -38,7 +38,6 @@ AS $$
         
     END;
 $$ LANGUAGE plpgsql;
--- call add_room(11,1,'Store', 5, null,null);
 
 
 --CORE join_meeting
@@ -89,6 +88,8 @@ $$ LANGUAGE sql;
 
 
 --ADMIN non_compliance
+-- find eid that did not declare their temperatures once every day from 
+-- start_date to end_date and the number of days that they did not declare
 CREATE OR REPLACE FUNCTION non_compliance
     (IN start_date DATE, IN end_date DATE)
 RETURNS TABLE(eid INTEGER, days INTEGER) AS $$
@@ -102,6 +103,7 @@ RETURNS TABLE(eid INTEGER, days INTEGER) AS $$
 $$ LANGUAGE sql;
 
 --ADMIN view_booking_report
+--find all meeting rooms booked by employee eid
 CREATE OR REPLACE FUNCTION view_booking_report
     (IN start_date DATE, IN input_eid INTEGER)
 RETURNS TABLE(floor INTEGER, room INTEGER, date DATE, start_hour TIME, is_approved TEXT) AS $$
@@ -117,6 +119,7 @@ $$ LANGUAGE sql;
 
 
 --ADMIN view_future_meeting
+-- find all approved future meetings employee eid is going to have
 CREATE OR REPLACE FUNCTION view_future_meeting
     (IN start_date DATE, IN input_eid INTEGER)
 RETURNS TABLE(floor INTEGER, room INTEGER, date DATE, start_hour TIME) AS $$
@@ -129,6 +132,8 @@ RETURNS TABLE(floor INTEGER, room INTEGER, date DATE, start_hour TIME) AS $$
 $$ LANGUAGE sql;
 
 --ADMIN view_manager_report
+--find all booked sessions that have not been approved
+-- if eid not in Managers then return empty table
 CREATE OR REPLACE FUNCTION view_manager_report
     (IN start_date DATE, IN input_eid INTEGER)
 RETURNS TABLE(floor INTEGER, room INTEGER, date DATE, start_hour TIME, eid INTEGER) AS $$
