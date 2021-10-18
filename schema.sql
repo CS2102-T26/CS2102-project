@@ -252,7 +252,7 @@ CREATE TRIGGER employee_approving_not_resigned
 BEFORE INSERT ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
--- Trigger for leaving meeting; 
+-- Trigger(s) for leaving meeting; 
 -- check that 
--- session has not been approved and
+-- session has not been approved
 -- eid is in meeting initially
