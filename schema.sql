@@ -2,7 +2,7 @@ DROP TABLE IF EXISTS Employees, WorksIn, Departments, MeetingRooms, LocatedIn, J
 Bookers, Seniors, Managers, Updates, HealthDeclaration, Sessions, Joins, Books, Approves CASCADE;
 
 CREATE TABLE Employees (
-    eid INTEGER,
+    eid SERIAL, -- to get auto increment
     ename TEXT,
     email TEXT UNIQUE NOT NULL, -- c2, c3
     resign_date DATE, -- c3 (date is NULL if active), c33 use soft delete
