@@ -27,18 +27,19 @@ CREATE TABLE WorksIn (
 );
 
 CREATE TABLE MeetingRooms (
-    room INTEGER,
     floor INTEGER,
+    room INTEGER,
     rname TEXT NOT NULL, -- c7
-    PRIMARY KEY (room, floor) -- c6
+    -- capacity INTEGER,
+    PRIMARY KEY (floor, room) -- c6
 );
 
 CREATE TABLE LocatedIn (
-    room INTEGER,
     floor INTEGER,
+    room INTEGER,
     did INTEGER NOT NULL,
-    PRIMARY KEY (room, floor), -- c10, each room, floor can only belong to one did
-    FOREIGN KEY(room, floor) REFERENCES MeetingRooms,
+    PRIMARY KEY (floor, room), -- c10, each room, floor can only belong to one did
+    FOREIGN KEY(floor, room) REFERENCES MeetingRooms,
     FOREIGN KEY (did) REFERENCES Departments -- c11
 );
 
@@ -71,11 +72,11 @@ CREATE TABLE Updates (
     eid INTEGER,
     date DATE,
     new_cap INTEGER,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Managers,
-    FOREIGN KEY (room, floor) REFERENCES MeetingRooms
+    FOREIGN KEY (floor, room) REFERENCES MeetingRooms DEFERRABLE INITIALLY DEFERRED
 );
 
 CREATE TABLE HealthDeclaration ( -- c28 cant really enforce
@@ -96,9 +97,9 @@ CREATE OR REPLACE VIEW fever AS (
 CREATE TABLE Sessions (
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (time, date, room, floor)
+    room INTEGER,
+    PRIMARY KEY (time, date, floor, room)
 );
 
 CREATE TABLE Joins (
@@ -110,11 +111,11 @@ CREATE TABLE Joins (
     eid INTEGER,
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, time, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Employees,
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
+    FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c26 need verify syntax from psql docs
 );
 
@@ -125,11 +126,11 @@ CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, seni
     eid INTEGER,
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (eid, time, date, room, floor),
+    room INTEGER,
+    PRIMARY KEY (eid, time, date, floor, room),
     FOREIGN KEY (eid) REFERENCES Bookers,
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
+    FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c25 need verify syntax
 );
 
@@ -140,11 +141,11 @@ CREATE TABLE Approves (
     eid INTEGER NOT NULL, -- c22 add not null constraint
     time TIME,
     date DATE,
-    room INTEGER,
     floor INTEGER,
-    PRIMARY KEY (time, date, room, floor), -- c22 remove eid so meeting only approved once
+    room INTEGER,
+    PRIMARY KEY (time, date, floor, room), -- c22 remove eid so meeting only approved once
     FOREIGN KEY (eid) REFERENCES Managers,
-    FOREIGN KEY (time, date, room, floor) REFERENCES Sessions,
+    FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c27 need verify syntax
 );
 
