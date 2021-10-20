@@ -100,41 +100,59 @@ $$ LANGUAGE sql;
 
 -- book_room
 
--- unbook_room
+-- unbook_room (unbook == booker) -- approved -> remove approval --  employees joined -> removed joined employees 
+
+CREATE OR REPLACE PROCEDURE unbook_room
+    (floor INTEGER, room INTEGER, date DATE, start)
+
 
 -- join_meeting
 -- no end_time
 CREATE OR REPLACE PROCEDURE join_meeting
-    (floor INTEGER, room INTEGER, date DATE, start_time TIME, eid INTEGER)
+    (floor INTEGER, room INTEGER, date DATE, start_time TIME, end_time TIME, eid INTEGER)
 AS $$
-    INSERT INTO Joins (eid, time, date, floor, room)
-    VALUES (eid, start_time, date, floor, room)
-$$ LANGUAGE sql;
+BEGIN
+    WHILE start_time < end_time LOOP
+        INSERT INTO Joins (eid, time, date, floor, room)
+        VALUES (eid, start_time, date, floor, room);
+        start_time := start_time + '01:00:00';
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
 
 -- leave_meeting
 CREATE OR REPLACE PROCEDURE leave_meeting
-    (floor INTEGER, room INTEGER, date DATE, start_time TIME, eid INTEGER)
+    (floor INTEGER, room INTEGER, date DATE, start_time TIME, end_time TIME, eid INTEGER)
 AS $$
     DECLARE
         input_floor INTEGER := floor;
         input_room INTEGER := room;
         input_date DATE := date;
         input_start_time TIME := start_time;
+        input_end_time TIME := end_time;
         input_eid INTEGER := eid;
     BEGIN
-        DELETE FROM Joins j
-        WHERE input_eid = j.eid AND input_start_time = j.time AND input_date = j.date
+        WHILE input_start_time < input_end_time LOOP
+            DELETE FROM Joins j
+            WHERE input_eid = j.eid AND input_start_time = j.time AND input_date = j.date
             AND input_floor = j.floor AND input_room = j.room;
+            input_start_time := input_start_time + '01:00:00';
+        END LOOP;
     END;
 $$ LANGUAGE plpgsql;
 
 -- approve_meeting
 CREATE OR REPLACE PROCEDURE approve_meeting
-    (floor INTEGER, room INTEGER, date DATE, start_time TIME, eid INTEGER)
+    (floor INTEGER, room INTEGER, date DATE, start_time TIME, end_time TIME, eid INTEGER)
 AS $$
-    INSERT INTO Approves (eid, time, date, floor, room)
-    VALUES (eid, start_time, date, floor, room)
-$$ LANGUAGE sql;
+    BEGIN
+        WHILE start_time < end_time LOOP
+            INSERT INTO Approves (eid, time, date, floor, room)
+                VALUES (eid, start_time, date, floor, room);
+            start_time := start_time + '01:00:00';
+        END LOOP;    
+    END;
+$$ LANGUAGE plpgsql;
 
 -- HEALTH 
 -- declare_health

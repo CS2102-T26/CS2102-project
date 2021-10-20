@@ -151,6 +151,12 @@ CREATE TABLE Approves (
 
 -- NEED TO DO CONTACT TRACING LATER
 
+
+
+
+
+
+
 -- Triggers
 
 -- Trigger function removing any room booking after capacity update date
@@ -209,9 +215,49 @@ $$ LANGUAGE plpgsql;
 -- Trigger(s) for joining meeting;
 -- check that 
 -- employee is still working for company [DONE]
--- session has been booked 
--- session has not past
--- session has not been approved
+-- session has been booked [DONE]
+-- session has not past [DONE in check constraint]
+-- session has not been approved [DONE]
+
+CREATE OR REPLACE FUNCTION check_if_in_approves() RETURNS TRIGGER AS $$
+DECLARE
+    is_in boolean := NOT EXISTS (SELECT 1
+                        FROM Approves a
+                        WHERE NEW.time = a.time AND NEW.date = a.date
+                        AND NEW.floor = a.floor AND NEW.room = a.room
+                        );
+BEGIN
+    IF (is_in = TRUE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+--check if session is not approved before joining
+CREATE TRIGGER check_join_not_approved_session
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_if_in_approves();
+
+
+CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
+DECLARE
+    is_in boolean := EXISTS (SELECT 1
+                        FROM Books b
+                        WHERE NEW.time = b.time AND NEW.date = b.date
+                        AND NEW.floor = b.floor AND NEW.room = b.room
+                        );
+BEGIN
+    IF (is_in = TRUE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+--check if session is booked before joining
+CREATE TRIGGER check_join_booked_session
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
+
 
 CREATE TRIGGER employee_joining_not_resigned
 BEFORE INSERT ON Joins
@@ -230,11 +276,8 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- Trigger(s) for unbooking meeting;
 -- Check that 
--- session has been booked
 -- employee is still working for company [DONE]
--- employee is same employee who booked meeting
--- if approved; remove approval 
--- if employees joined; removed joined employees
+
 CREATE TRIGGER employee_removing_booking_not_resigned
 BEFORE DELETE ON Books
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
