@@ -102,10 +102,6 @@ $$ LANGUAGE sql;
 
 -- unbook_room (unbook == booker) -- approved -> remove approval --  employees joined -> removed joined employees 
 
-CREATE OR REPLACE PROCEDURE unbook_room
-    (floor INTEGER, room INTEGER, date DATE, start)
-
-
 -- join_meeting
 -- no end_time
 CREATE OR REPLACE PROCEDURE join_meeting
