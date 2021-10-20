@@ -69,6 +69,9 @@ AS $$
 $$ LANGUAGE plpgsql;
 
 --CORE approve_meeting
+-- only managers can approve meeting
+-- only a single approval can be made for each session
+--
 CREATE OR REPLACE PROCEDURE approve_meeting
     (floor INTEGER, room INTEGER, date DATE, start_time TIME, eid INTEGER)
 AS $$
