@@ -97,10 +97,50 @@ $$ LANGUAGE sql;
 
 -- CORE
 -- search_room
+CREATE OR REPLACE PROCEDURE search_room(
+    IN capacity INT, IN curr_date DATE, IN start_hour TIME, IN end_hour TIME
+) AS $$
+$$ LANGUAGE plpgsql;
 
 -- book_room
+-- book all rooms between start and end hour
+CREATE OR REPLACE PROCEDURE book_room(
+    IN floor_number INT, IN room_number INT, IN book_date DATE, 
+    IN start_hour TIME, IN end_hour TIME, IN booker_eid INT
+) AS $$
+DECLARE
+    currTime TIME := start_hour;
+BEGIN
+    LOOP
+        EXIT WHEN currTime = end_hour;
+        INSERT INTO Books (eid, time, date, floor, room)
+        VALUES (booker_eid, currTime, book_date, floor_number, room_number);
+        currTime := currTime + '01:00:00';
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
 
 -- unbook_room
+-- checked employee is same employee who booked meeting
+CREATE OR REPLACE PROCEDURE unbook_room(
+    IN floor_number INT, IN room_number INT, IN book_date DATE,
+    IN start_hour TIME, IN end_hour TIME, IN unbooker_eid INT
+) AS $$
+DECLARE
+    currTime TIME := start_hour;
+BEGIN
+    LOOP
+        EXIT WHEN currTime = end_hour;
+        DELETE FROM Books B
+        WHERE B.eid = unbooker_eid
+        AND B.floor = floor_number
+        AND B.room = room_number
+        AND B.time = currTime
+        AND B.date = book_date;
+        currTime := currTime + '01:00:00';
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql;
 
 -- join_meeting
 -- no end_time

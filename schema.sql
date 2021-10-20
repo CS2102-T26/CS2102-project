@@ -155,16 +155,41 @@ CREATE TABLE Approves (
 
 -- Trigger function removing any room booking after capacity update date
 -- with number of employees over the new capacity
-CREATE OR REPLACE FUNCTION remove_rooms_over_capacity() RETURNS TRIGGER AS $$
-    -- Find all sessions over_capacity after the date of update; NEW.date
-    -- Remove session from Books and Approves; Need use CURSOR
+CREATE OR REPLACE FUNCTION remove_bookings_over_capacity() RETURNS TRIGGER AS $$
+DECLARE
+    -- Selects all booked meetings with capacity over new_capacity 
+    -- for room where capacity was changed
+    curs CURSOR FOR (SELECT B.time, B.date, B.floor, B.room, COUNT(J.eid)
+                    FROM Books B JOIN Joins J 
+                        ON B.time = J.time AND B.date = J.date
+                           AND B.floor = J.floor AND B.room = J.room
+                    WHERE B.floor = NEW.floor AND B.room = NEW.room and B.date > NEW.new_cap
+                    GROUP BY B.time, B.date, B.floor, B.room
+                    HAVING COUNT(J.eid) > NEW.new_cap);
+    r1 RECORD;
+BEGIN
+    OPEN curs;
+    LOOP
+        -- EXIT WHEN NO MORE ROWS
+        FETCH curs INTO r1;
+        EXIT WHEN NOT FOUND;
+        -- DELETE from Books 
+        DELETE FROM Books B1
+        WHERE B1.time = r1.time 
+        AND B1.date = r1.date
+        AND  B1.floor = r1.floor
+        AND B1.room = r1.room;
+    END LOOP;
+    CLOSE curs;
     RETURN NULL;
+END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to remove all sessions not meeting requirements after cap update
+DROP TRIGGER IF EXISTS capacity_updated ON Updates;
 CREATE TRIGGER capacity_updated
 AFTER UPDATE ON Updates
-FOR EACH ROW EXECUTE FUNCTION remove_sessions_over_capacity();
+FOR EACH ROW EXECUTE FUNCTION remove_bookings_over_capacity();
 
 
 -- Trigger on UPDATE of Employee resign_date
@@ -187,6 +212,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS employee_resigned ON Employees;
 CREATE TRIGGER employee_resigned
 AFTER UPDATE ON Employees
 FOR EACH ROW EXECUTE FUNCTION remove_from_future_records();
@@ -200,8 +226,9 @@ BEGIN
     -- get date of employee joining, booking or adding
     SELECT resign_date INTO e_left_date FROM Employees WHERE eid = NEW.eid;
     -- Return null if no longer working there; resigned_date < date
-    IF NEW.date > e_left_date THEN RETURN NULL;
+    IF e_left_date IS NOT NULL AND NEW.date > e_left_date THEN RETURN NULL;
     END IF;
+    -- join / book / approve
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -209,35 +236,32 @@ $$ LANGUAGE plpgsql;
 -- Trigger(s) for joining meeting;
 -- check that 
 -- employee is still working for company [DONE]
--- session has been booked 
--- session has not past
--- session has not been approved
+-- session has been booked [DONE]
+-- session has not been approved [DONE]
+-- not over room capacity [Le Zong claims he can do]
 
+DROP TRIGGER IF EXISTS employee_joining_not_resigned ON Joins;
 CREATE TRIGGER employee_joining_not_resigned
-BEFORE INSERT ON Joins
+BEFORE INSERT OR UPDATE ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- Trigger(s) for booking meeting;
 -- Check that 
 -- booker is still working for company [DONE]
--- session has not been booked 
--- person booking is a Booker
--- booker has no fever
+-- person booking is a Booker [Swann]
+-- booker has no fever [Swann]
 
+DROP TRIGGER IF EXISTS employee_booking_not_resigned ON Books;
 CREATE TRIGGER employee_booking_not_resigned
-BEFORE INSERT ON Books
+BEFORE INSERT OR UPDATE ON Books
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
--- Trigger(s) for unbooking meeting;
+-- Trigger(s) for unbooking meeting; BEFORE DELETE 
 -- Check that 
--- session has been booked
--- employee is still working for company [DONE]
--- employee is same employee who booked meeting
--- if approved; remove approval 
--- if employees joined; removed joined employees
-CREATE TRIGGER employee_removing_booking_not_resigned
-BEFORE DELETE ON Books
-FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
+-- employee is still working for company [DONE]: once employee resigned, all meetings
+    -- booked by him after resign date are unbooked automatically; trigger on top
+-- if approved; remove approval [Swann]
+-- if employees joined; removed joined employees [Swann]
 
 -- Trigger(s) for approving meetings
 -- Check that 
@@ -248,8 +272,9 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- session has been booked
 -- person approving is in the same department as the meeting room
 
+DROP TRIGGER IF EXISTS employee_approving_not_resigned ON Approves;
 CREATE TRIGGER employee_approving_not_resigned
-BEFORE INSERT ON Approves
+BEFORE INSERT OR UPDATE ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- Trigger(s) for leaving meeting; 
