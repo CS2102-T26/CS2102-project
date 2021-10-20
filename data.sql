@@ -86,6 +86,7 @@ $$ LANGUAGE plpgsql;
 -- session has been booked [DONE]
 -- session has not past [DONE in check constraint]
 -- session has not been approved [DONE]
+-- not over capacity [Swann]
 
 CREATE OR REPLACE FUNCTION check_if_in_approves() RETURNS TRIGGER AS $$
 DECLARE
@@ -134,6 +135,10 @@ CREATE TRIGGER employee_joining_not_resigned
 BEFORE INSERT OR UPDATE ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
+-- Trigger(s) for leaving meeting; 
+-- check that 
+-- session has not been approved [Le Zong]
+
 -- Trigger(s) for booking meeting;
 -- Check that 
 -- booker is still working for company [DONE]
@@ -155,19 +160,15 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- Trigger(s) for approving meetings
 -- Check that 
--- person approving is a manager
+-- person approving is a manager [Le Zong]
 -- person is still working for company [DONE]
--- session has not past 
--- session has not been approved
--- session has been booked
--- person approving is in the same department as the meeting room
+-- session has not been approved [Le Zong]
+-- session has been booked [Le Zong]
+-- person approving is in the same department as the meeting room [Le Zong]
 
 DROP TRIGGER IF EXISTS employee_approving_not_resigned ON Approves;
 CREATE TRIGGER employee_approving_not_resigned
 BEFORE INSERT OR UPDATE ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
--- Trigger(s) for leaving meeting; 
--- check that 
--- session has not been approved
--- eid is in meeting initially
+
