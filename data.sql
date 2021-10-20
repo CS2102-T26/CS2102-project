@@ -171,4 +171,94 @@ CREATE TRIGGER employee_approving_not_resigned
 BEFORE INSERT OR UPDATE ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
+-- insert into juniors is not booker
+CREATE OR REPLACE FUNCTION check_if_booker() RETURNS TRIGGER AS $$
+DECLARE
+    is_in BOOLEAN := EXISTS (SELECT 1
+                        FROM Bookers b
+                        WHERE NEW.eid = b.eid
+                        );
+BEGIN
+    IF (is_in = FALSE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- insert into seniors is not junior or manager
+CREATE OR REPLACE FUNCTION check_if_jr_or_mgr() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_jr BOOLEAN := EXISTS (SELECT 1
+                        FROM Juniors j
+                        WHERE NEW.eid = j.eid
+                        );
+    is_in_mgr BOOLEAN := EXISTS (SELECT 1
+                        FROM Managers m
+                        WHERE NEW.eid = m.eid
+                        );
+BEGIN
+    IF (is_in_jr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- insert into manager is not senior or junior
+CREATE OR REPLACE FUNCTION check_if_sr_or_jr() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_jr BOOLEAN := EXISTS (SELECT 1
+                        FROM Juniors j
+                        WHERE NEW.eid = j.eid
+                        );
+    is_in_sr BOOLEAN := EXISTS (SELECT 1
+                        FROM Seniors s
+                        WHERE NEW.eid = s.eid
+                        );
+BEGIN
+    IF (is_in_jr = FALSE AND is_in_sr = FALSE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- updates trigger to check if is manager and dept of manager+room
+CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_mgr BOOLEAN := EXISTS (SELECT 1
+                        FROM Managers m
+                        WHERE NEW.eid = m.eid
+                        );
+    is_mgr_of_dept BOOLEAN := EXISTS (SELECT 1
+                            FROM LocatedIn l
+                            JOIN WorksIn w
+                            ON l.floor = NEW.floor
+                            AND l.room = NEW.room
+                            AND l.did = w.did
+                            WHERE NEW.eid = w.eid);
+BEGIN
+    IF (is_in_mgr = TRUE AND is_mgr_of_dept) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS junior_employee_not_booker ON Juniors;
+CREATE TRIGGER junior_employee_not_booker
+BEFORE INSERT ON Juniors
+FOR EACH ROW EXECUTE FUNCTION check_if_booker();
+
+DROP TRIGGER IF EXISTS senior_employee_not_jr_or_mgr ON Seniors;
+CREATE TRIGGER senior_employee_not_jr_or_mgr
+BEFORE INSERT ON Seniors
+FOR EACH ROW EXECUTE FUNCTION check_if_jr_or_mgr();
+
+DROP TRIGGER IF EXISTS manager_not_sr_or_jr ON Managers;
+CREATE TRIGGER manager_not_sr_or_jr
+BEFORE INSERT ON Managers
+FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_jr();
+
+DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
+CREATE TRIGGER check_valid_employee_update
+BEFORE INSERT ON Updates
+FOR EACH ROW EXECUTE FUNCTION check_if_can_update();
 
