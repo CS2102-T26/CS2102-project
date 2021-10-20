@@ -262,3 +262,90 @@ CREATE TRIGGER check_valid_employee_update
 BEFORE INSERT ON Updates
 FOR EACH ROW EXECUTE FUNCTION check_if_can_update();
 
+-- Due to the pandemic, we have to be vigilant. If an employee is recorded to have a fever at a given day D, a few things
+-- must happen:
+-- 1. The employee is removed from all future meeting room booking, approved or not. [DONE]
+-- If the employee is the one booking the room, the booking is cancelled, approved or not. [DONE]
+-- This employee cannot book a room until they are no longer having fever. [DONE]
+-- 2. All employees in the same approved meeting room from the past 3 (i.e., from day D-3 to day D) days are contacted.
+-- These employees are removed from future meeting in the next 7 days (i.e., from day D to day D+7).
+-- We say that these employees were in close contact with the employee having a fever.
+-- These restrictions are based on the assumptions that once approved, the meeting will occur with all participants
+-- attending.
+
+CREATE OR REPLACE FUNCTION remove_on_fever() RETURNS TRIGGER AS $$
+DECLARE
+    has_fever BOOLEAN := (NEW.temp > 37.5);
+    curs CURSOR FOR (SELECT b.time, b.date, b.floor, b.room FROM
+            Books b WHERE NEW.eid = b.eid 
+            AND b.date > NEW.date);
+    r1 RECORD;
+BEGIN
+    IF (has_fever) THEN
+
+        -- meetings employee joins
+        DELETE FROM Joins j 
+        WHERE j.eid = NEW.eid
+        AND j.date >= NEW.date;
+
+        -- remove all employees from meetings booked by this employee
+        -- intentionally done before deletion of booking
+        OPEN curs;
+        LOOP
+            FETCH curs INTO r1;
+            EXIT WHEN NOT FOUND;
+            DELETE FROM Joins j1
+            WHERE j1.time = r1.time 
+            AND j1.date = r1.date
+            AND  j1.floor = r1.floor
+            AND j1.room = r1.room;
+        END LOOP;
+        CLOSE curs;
+
+        -- meetings employee has booked
+        DELETE FROM Books b 
+        WHERE b.eid = NEW.eid
+        AND b.date >= NEW.date;
+
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
+CREATE TRIGGER remove_on_fever
+AFTER INSERT ON HealthDeclaration
+FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
+
+CREATE OR REPLACE FUNCTION check_for_fever() RETURNS TRIGGER AS $$
+DECLARE
+    has_fever BOOLEAN := ((SELECT temp
+                        FROM HealthDeclaration WHERE eid = NEW.eid
+                        ORDER BY date DESC
+                        LIMIT 1) > 37.5);
+BEGIN
+    IF (has_fever) THEN RETURN NULL;
+    ELSE RETURN NEW;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_for_fever ON Books;
+CREATE TRIGGER check_for_fever
+BEFORE INSERT ON Books
+FOR EACH ROW EXECUTE FUNCTION check_for_fever();
+
+--TEST
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
+insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
+insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
+--should be valid at this point
+SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
+insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
+--should display nothing
+SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
+-- should display nothing
+SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
+
+
+delete from HealthDeclaration where date = '2021-10-21';
