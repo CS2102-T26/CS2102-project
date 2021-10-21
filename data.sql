@@ -267,8 +267,8 @@ FOR EACH ROW EXECUTE FUNCTION check_if_can_update();
 -- 1. The employee is removed from all future meeting room booking, approved or not. [DONE]
 -- If the employee is the one booking the room, the booking is cancelled, approved or not. [DONE]
 -- This employee cannot book a room until they are no longer having fever. [DONE]
--- 2. All employees in the same approved meeting room from the past 3 (i.e., from day D-3 to day D) days are contacted.
--- These employees are removed from future meeting in the next 7 days (i.e., from day D to day D+7).
+-- 2. All employees in the same approved meeting room from the past 3 (i.e., from day D-3 to day D) days are contacted. [NOT SURE WHAT THEY MEAN BY CONTACTED]
+-- These employees are removed from future meeting in the next 7 days (i.e., from day D to day D+7). [DONE, BUT ONLY FOR JOINS. PROBABLY NEED SOME ON DELETE CASCADE FOR BOOKS]
 -- We say that these employees were in close contact with the employee having a fever.
 -- These restrictions are based on the assumptions that once approved, the meeting will occur with all participants
 -- attending.
@@ -334,6 +334,83 @@ DROP TRIGGER IF EXISTS check_for_fever ON Books;
 CREATE TRIGGER check_for_fever
 BEFORE INSERT ON Books
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
+
+
+
+CREATE OR REPLACE FUNCTION remove_contacted_employees_on_fever() RETURNS TRIGGER AS $$
+DECLARE
+    has_fever BOOLEAN := (NEW.temp > 37.5);
+    -- getting all employees that joined/booked rooms that this employee joined/booked in the past 3 days
+    curs CURSOR FOR (SELECT j1.eid FROM
+            Joins j1 JOIN Joins j2
+            ON j2.eid = NEW.eid
+            AND j2.date < NEW.date
+            AND j2.date >= NEW.date 
+            AND j2.time = j1.time
+            AND j2.date = j1.date
+            AND j2.floor = j1.floor
+            AND j2.room = j1.room
+            UNION
+            SELECT b.eid FROM
+            Books b JOIN Joins j
+            ON j.eid = NEW.eid
+            AND j.date < NEW.date
+            AND j.date >= NEW.date 
+            AND j.time = b.time
+            AND j.date = b.date
+            AND j.floor = b.floor
+            AND j.room = b.room
+            UNION
+            SELECT j.eid FROM
+            Joins j JOIN Books b
+            ON b.eid = NEW.eid
+            AND b.date < NEW.date
+            AND b.date >= NEW.date 
+            AND j.time = b.time
+            AND j.date = b.date
+            AND j.floor = b.floor
+            AND j.room = b.room);
+    r1 RECORD;
+    
+BEGIN
+    IF (has_fever) THEN
+
+        -- remove all employees that attended meetings booked by this employee in the past 3 days
+        -- from meetings in the next 7 days (Both joining and bookings)
+        -- Note that removing the booker from the booked session currently does nothing, probably need some cascade
+        OPEN curs;
+        LOOP
+            FETCH curs INTO r1;
+            EXIT WHEN NOT FOUND;
+            DELETE FROM Joins j1
+            WHERE r1.eid = j1.eid
+            AND j1.date > NEW.date
+            AND j1.date <= NEW.date + 7;
+        END LOOP;
+        LOOP
+            FETCH curs INTO r1;
+            EXIT WHEN NOT FOUND;
+            DELETE FROM Books b1
+            WHERE r1.eid = b1.eid
+            AND b1.date > NEW.date
+            AND b1.date <= NEW.date + 7;
+        END LOOP;
+        CLOSE curs;
+
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
+CREATE TRIGGER remove_on_fever
+AFTER INSERT ON HealthDeclaration
+FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
+
+DROP TRIGGER IF EXISTS remove_contacted_employees_on_fever ON HealthDeclaration;
+CREATE TRIGGER remove_contacted_employees_on_fever
+AFTER INSERT ON HealthDeclaration
+FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
 
 --TEST
 insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
