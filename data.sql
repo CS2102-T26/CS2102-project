@@ -293,41 +293,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- updates trigger to check if is manager and dept of manager+room
-CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+DROP TRIGGER IF EXISTS manager_not_sr_or_jr ON Managers;
+CREATE TRIGGER manager_not_sr_or_jr
+BEFORE INSERT ON Managers
+FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_jr();
+
+
+-- C13, C14
+-- Only allow inserts for seniors or managers for Books table
+CREATE OR REPLACE FUNCTION check_if_can_book() RETURNS TRIGGER AS $$
 DECLARE
-    is_in_mgr BOOLEAN := EXISTS (SELECT 1
-                        FROM Managers m
-                        WHERE NEW.eid = m.eid
-                        );
-    is_mgr_of_dept BOOLEAN := EXISTS (SELECT 1
-                            FROM LocatedIn l
-                            JOIN WorksIn w
-                            ON l.floor = NEW.floor
-                            AND l.room = NEW.room
-                            AND l.did = w.did
-                            WHERE NEW.eid = w.eid);
+    is_in_booker BOOLEAN := is_booker(NEW.eid);
 BEGIN
-    IF (is_in_mgr = TRUE AND is_mgr_of_dept) THEN RETURN NEW;
+    IF (is_in_booker = TRUE) THEN RETURN NEW;
     ELSE RETURN NULL;
     END IF;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS junior_employee_not_booker ON Juniors;
-CREATE TRIGGER junior_employee_not_booker
-BEFORE INSERT ON Juniors
-FOR EACH ROW EXECUTE FUNCTION check_if_booker();
+DROP TRIGGER IF EXISTS valid_room_booker ON Books;
+CREATE TRIGGER valid_room_booker
+BEFORE INSERT ON Books
+FOR EACH ROW EXECUTE FUNCTION check_if_can_book();
+-- insert into Sessions values ('11:00:00', '2022-10-17', 5, 5);
+-- insert into Books (eid, time, date, floor, room) values (293, '11:00:00', '2022-10-16', 1, 1);
 
-DROP TRIGGER IF EXISTS senior_employee_not_jr_or_mgr ON Seniors;
-CREATE TRIGGER senior_employee_not_jr_or_mgr
-BEFORE INSERT ON Seniors
-FOR EACH ROW EXECUTE FUNCTION check_if_jr_or_mgr();
 
-DROP TRIGGER IF EXISTS manager_not_sr_or_jr ON Managers;
-CREATE TRIGGER manager_not_sr_or_jr
-BEFORE INSERT ON Managers
-FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_jr();
 
 -- C24
 -- updates trigger to check if is manager and dept of manager+room for updating capacity
