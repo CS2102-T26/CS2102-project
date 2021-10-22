@@ -188,31 +188,83 @@ CREATE TRIGGER employee_approving_not_resigned
 BEFORE INSERT OR UPDATE ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
--- insert into juniors is not booker
-CREATE OR REPLACE FUNCTION check_if_booker() RETURNS TRIGGER AS $$
+
+
+
+/**
+ * NON-PROCEDURE RELATED CONSTRAINTS
+ */
+
+
+-- Refactor internal checks for reuse
+-- STORED FUNCTION TO CHECK IF JUNIOR
+CREATE OR REPLACE FUNCTION is_junior(checked_eid INTEGER) 
+RETURNS BOOLEAN AS $$
 DECLARE
-    is_in BOOLEAN := EXISTS (SELECT 1
-                        FROM Bookers b
-                        WHERE NEW.eid = b.eid
-                        );
+    is_in BOOLEAN;
 BEGIN
-    IF (is_in = FALSE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
+    is_in := EXISTS (SELECT 1 FROM Juniors J WHERE checked_eid = J.eid);
+    RETURN is_in;
 END;
 $$ LANGUAGE plpgsql;
 
+-- STORED FUNCTION TO CHECK IF SENIOR
+CREATE OR REPLACE FUNCTION is_senior(checked_eid INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE 
+    is_in BOOLEAN;
+BEGIN
+    is_in := EXISTS (SELECT 1 FROM Seniors S WHERE checked_eid = S.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF MANAGER
+CREATE OR REPLACE FUNCTION is_manager(checked_eid INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE
+    is_in BOOLEAN;
+BEGIN
+    is_in := EXISTS (SELECT 1 FROM Managers M WHERE checked_eid = M.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF BOOKER
+CREATE OR REPLACE FUNCTION is_booker(checked_eid INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE
+    is_in BOOLEAN;
+BEGIN
+    is_in := EXISTS (SELECT 1 FROM Bookers B WHERE checked_eid = B.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF MANAGER OF THAT DEPT
+CREATE OR REPLACE FUNCTION is_manager_of_dept(checked_eid INTEGER, checked_floor INTEGER, checked_room INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE 
+    is_mgr_of_dept BOOLEAN;
+BEGIN
+    is_mgr_of_dept := EXISTS (SELECT 1
+                        FROM LocatedIn l
+                        JOIN WorksIn w
+                        ON l.floor = checked_floor
+                        AND l.room = checked_room
+                        AND l.did = w.did
+                        WHERE checked_eid = w.eid);
+    RETURN is_mgr_of_dept;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- C12
 -- insert into seniors is not junior or manager
 CREATE OR REPLACE FUNCTION check_if_jr_or_mgr() RETURNS TRIGGER AS $$
 DECLARE
-    is_in_jr BOOLEAN := EXISTS (SELECT 1
-                        FROM Juniors j
-                        WHERE NEW.eid = j.eid
-                        );
-    is_in_mgr BOOLEAN := EXISTS (SELECT 1
-                        FROM Managers m
-                        WHERE NEW.eid = m.eid
-                        );
+    is_in_jr BOOLEAN := is_junior(NEW.eid);
+    is_in_mgr BOOLEAN := is_manager(NEW.eid);
 BEGIN
     IF (is_in_jr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
     ELSE RETURN NULL;
@@ -220,40 +272,20 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- insert into manager is not senior or junior
-CREATE OR REPLACE FUNCTION check_if_sr_or_jr() RETURNS TRIGGER AS $$
-DECLARE
-    is_in_jr BOOLEAN := EXISTS (SELECT 1
-                        FROM Juniors j
-                        WHERE NEW.eid = j.eid
-                        );
-    is_in_sr BOOLEAN := EXISTS (SELECT 1
-                        FROM Seniors s
-                        WHERE NEW.eid = s.eid
-                        );
-BEGIN
-    IF (is_in_jr = FALSE AND is_in_sr = FALSE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS senior_employee_not_jr_or_mgr ON Seniors;
+CREATE TRIGGER senior_employee_not_jr_or_mgr
+BEFORE INSERT ON Seniors
+FOR EACH ROW EXECUTE FUNCTION check_if_jr_or_mgr();
 
--- updates trigger to check if is manager and dept of manager+room
-CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+
+-- C12
+-- insert into juniors is not senior or manager
+CREATE OR REPLACE FUNCTION check_if_sr_or_mgr() RETURNS TRIGGER AS $$
 DECLARE
-    is_in_mgr BOOLEAN := EXISTS (SELECT 1
-                        FROM Managers m
-                        WHERE NEW.eid = m.eid
-                        );
-    is_mgr_of_dept BOOLEAN := EXISTS (SELECT 1
-                            FROM LocatedIn l
-                            JOIN WorksIn w
-                            ON l.floor = NEW.floor
-                            AND l.room = NEW.room
-                            AND l.did = w.did
-                            WHERE NEW.eid = w.eid);
+    is_in_sr BOOLEAN := is_senior(NEW.eid);
+    is_in_mgr BOOLEAN := is_manager(NEW.eid);
 BEGIN
-    IF (is_in_mgr = TRUE AND is_mgr_of_dept) THEN RETURN NEW;
+    IF (is_in_sr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
     ELSE RETURN NULL;
     END IF;
 END;
@@ -262,17 +294,61 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS junior_employee_not_booker ON Juniors;
 CREATE TRIGGER junior_employee_not_booker
 BEFORE INSERT ON Juniors
-FOR EACH ROW EXECUTE FUNCTION check_if_booker();
+FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_mgr();
 
-DROP TRIGGER IF EXISTS senior_employee_not_jr_or_mgr ON Seniors;
-CREATE TRIGGER senior_employee_not_jr_or_mgr
-BEFORE INSERT ON Seniors
-FOR EACH ROW EXECUTE FUNCTION check_if_jr_or_mgr();
+
+-- C12
+-- insert into manager is not senior or junior
+CREATE OR REPLACE FUNCTION check_if_sr_or_jr() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_jr BOOLEAN := is_junior(NEW.eid);
+    is_in_sr BOOLEAN := is_senior(NEW.eid);
+BEGIN
+    IF (is_in_jr = FALSE AND is_in_sr = FALSE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS manager_not_sr_or_jr ON Managers;
 CREATE TRIGGER manager_not_sr_or_jr
 BEFORE INSERT ON Managers
 FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_jr();
+
+
+-- C13, C14
+-- Only allow inserts for seniors or managers for Books table
+CREATE OR REPLACE FUNCTION check_if_can_book() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_booker BOOLEAN := is_booker(NEW.eid);
+BEGIN
+    IF (is_in_booker = TRUE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS valid_room_booker ON Books;
+CREATE TRIGGER valid_room_booker
+BEFORE INSERT ON Books
+FOR EACH ROW EXECUTE FUNCTION check_if_can_book();
+-- insert into Sessions values ('11:00:00', '2022-10-17', 5, 5);
+-- insert into Books (eid, time, date, floor, room) values (293, '11:00:00', '2022-10-16', 1, 1);
+
+
+
+-- C24
+-- updates trigger to check if is manager and dept of manager+room for updating capacity
+CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_mgr BOOLEAN := is_manager(NEW.eid);
+    is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
+BEGIN
+    IF (is_in_mgr = TRUE AND is_mgr_of_dept = TRUE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
 CREATE TRIGGER check_valid_employee_update
@@ -430,16 +506,17 @@ AFTER INSERT ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
 
 --TEST
-insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
-insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
-insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
---should be valid at this point
-SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
-insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
---should display nothing
-SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
--- should display nothing
-SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
+-- insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
+-- insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
+-- insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
+-- should be valid at this point
+-- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
+-- insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
+-- --should display nothing
+-- SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
+-- -- should display nothing
+-- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
 
 
-delete from HealthDeclaration where date = '2021-10-21';
+-- delete from HealthDeclaration where date = '2021-10-21';
+

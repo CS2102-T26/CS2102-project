@@ -120,7 +120,6 @@ CREATE TABLE Joins (
 );
 
 CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, senior, manager
-    -- c15 need trigger to check if booking for candidate room exists already for booked hour
     -- c16 need trigger to check health declaration for fever
     -- c34 need trigger to check if employee is still active worker
     eid INTEGER,
@@ -128,7 +127,7 @@ CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, seni
     date DATE,
     floor INTEGER,
     room INTEGER,
-    PRIMARY KEY (eid, time, date, floor, room),
+    PRIMARY KEY (time, date, floor, room), -- c15 remove eid from pkey for prevent different people from booking
     FOREIGN KEY (eid) REFERENCES Bookers,
     FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c25 need verify syntax

@@ -97,12 +97,77 @@ $$ LANGUAGE sql;
 
 -- CORE
 -- search_room
-CREATE OR REPLACE PROCEDURE search_room(
-    IN capacity INT, IN curr_date DATE, IN start_hour TIME, IN end_hour TIME
-) AS $$
+-- search and all rooms more than stated capacity within 
+-- start_hour and end_hour that are unbooked 
+CREATE OR REPLACE FUNCTION search_room(
+    IN search_capacity INT, IN search_date DATE, IN start_hour TIME, IN end_hour TIME
+) RETURNS TABLE(ans_floor INT, ans_room INT, ans_room_did INT, ans_capacity INT)
+AS $$
+DECLARE
+    -- table of all available sessions on that date with correct capacity
+    -- ordered by capacity, room, floor, time ascending
+    curs CURSOR FOR (SELECT S.floor, S.room, S.time, L.did, U.new_cap
+                     FROM LocatedIn L JOIN (Sessions S JOIN Updates U
+                         ON S.floor = U.floor AND S.room = U.room
+                     ) ON L.floor = S.floor AND L.room = S.room
+                     -- Session exists on that date
+                     WHERE S.date = search_date
+                     -- Room capacity > search_capacity
+                     AND U.new_cap >= search_capacity
+                     -- Session unbooked
+                     AND NOT EXISTS (
+                         SELECT 1
+                         FROM Books B 
+                         WHERE B.floor = S.floor
+                         AND B.room = S.room
+                         AND B.date = S.date
+                         AND B.time = S.time
+                     )
+                     ORDER BY U.new_cap, S.floor, S.room, S.time);
+    curr RECORD;
+    next RECORD;
+    prevTime TIME;
 BEGIN
-
-END
+    OPEN curs;
+    LOOP
+        FETCH curs INTO curr;
+        EXIT WHEN NOT FOUND;
+        -- Move curr until session with correct start time found
+        CONTINUE WHEN curr.time <> start_hour;
+        -- Means curr.time = start_hour
+        -- check if 1 hour slot
+        -- if 1 hr slot and curr.time = start_hour means available session
+        IF start_hour = end_hour - '01:00:00' THEN
+            ans_floor := curr.floor;
+            ans_room := curr.room;
+            ans_room_did := curr.did;
+            ans_capacity := curr.new_cap;
+            RETURN NEXT;
+            CONTINUE;
+        END IF;
+        prevTime := start_hour;
+        LOOP
+            FETCH curs INTO next;
+            -- Continue shifting next unless
+            EXIT WHEN next.floor <> curr.floor -- diff floor
+            OR next.room <> curr.room  -- diff room
+            OR next.time > prevTime + '01:00:00' -- not consecutive
+            OR NOT FOUND; -- end of table
+            -- if next.time = end_hour - 1 => available room found
+            IF next.time = end_hour - '01:00:00' THEN
+                ans_floor := curr.floor;
+                ans_room := curr.room;
+                ans_room_did := curr.did;
+                ans_capacity := curr.new_cap;
+                RETURN NEXT;
+            END IF;
+            -- increment prevTime
+            prevTime := next.time;
+        END LOOP;
+        MOVE RELATIVE -1 FROM curs;
+    END LOOP;
+    CLOSE curs;
+END;
 $$ LANGUAGE plpgsql;
 
 -- book_room
@@ -112,14 +177,40 @@ CREATE OR REPLACE PROCEDURE book_room(
     IN start_hour TIME, IN end_hour TIME, IN booker_eid INT
 ) AS $$
 DECLARE
+    -- find number of available sessions for that room
+    -- between start and end hour
+    numSessions INT := (SELECT COUNT(*) 
+                    FROM Sessions S
+                    WHERE S.floor = floor_number
+                    AND S.room = room_number
+                    AND S.date = book_date
+                    AND S.time >= start_hour
+                    AND S.time < end_hour
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM Sessions S JOIN Books B
+                            ON floor_number = B.floor
+                            AND room_number = B.room
+                            AND book_date = B.date
+                            AND S.time = B.time
+                    ));
+    tempTime TIME := start_hour;
     currTime TIME := start_hour;
 BEGIN
-    LOOP
-        EXIT WHEN currTime = end_hour;
-        INSERT INTO Books (eid, time, date, floor, room)
-        VALUES (booker_eid, currTime, book_date, floor_number, room_number);
-        currTime := currTime + '01:00:00';
+    -- if numSessions enough; adding numSessions of 1 hr increments
+    -- will be equal to end_hour; numSessions <= necessary; never over
+    FOR count in 1..numSessions LOOP
+        tempTime := tempTime + '01:00:00'; 
     END LOOP;
+    -- if tempTime = end_hour; add all that can be added
+    IF tempTime = end_hour THEN
+        LOOP
+            EXIT WHEN currTime = end_hour;
+            INSERT INTO Books (eid, time, date, floor, room)
+            VALUES (booker_eid, currTime, book_date, floor_number, room_number);
+            currTime := currTime + '01:00:00';
+        END LOOP;
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -148,16 +239,34 @@ $$ LANGUAGE plpgsql;
 
 
 -- join_meeting
--- no end_time
 CREATE OR REPLACE PROCEDURE join_meeting
-    (floor INTEGER, room INTEGER, date DATE, start_time TIME, end_time TIME, eid INTEGER)
+    (floor_number INTEGER, room_number INTEGER, join_date DATE, 
+    start_time TIME, end_time TIME, joiner_eid INTEGER)
 AS $$
+DECLARE 
+    -- find number of booked sessions for that slot
+    numSessions INT := (SELECT COUNT(*)
+                        FROM Books B
+                        WHERE B.floor = floor_number
+                        AND B.room = room_number
+                        AND B.date = join_date
+                        AND B.time >= start_time
+                        AND B.time < end_time); 
+    tempTime TIME := start_time;
 BEGIN
-    WHILE start_time < end_time LOOP
-        INSERT INTO Joins (eid, time, date, floor, room)
-        VALUES (eid, start_time, date, floor, room);
-        start_time := start_time + '01:00:00';
+    -- check if all sessions required are booked
+    FOR count in 1..numSessions LOOP
+        tempTime := tempTime + '01:00:00'; 
     END LOOP;
+    -- if tempTime = end_hour; all required sessions are booked
+    -- join all
+    IF tempTime = end_time THEN
+        WHILE start_time < end_time LOOP
+            INSERT INTO Joins (eid, time, date, floor, room)
+            VALUES (joiner_eid, start_time, join_date, floor_number, room_number);
+            start_time := start_time + '01:00:00';
+        END LOOP;
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 

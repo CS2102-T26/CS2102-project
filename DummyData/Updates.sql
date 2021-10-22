@@ -12,3 +12,23 @@ insert into Updates (eid, date, new_cap, floor, room) values (294, '2019-10-15',
 insert into Updates (eid, date, new_cap, floor, room) values (294, '2019-10-15', 8, 4, 4);
 insert into Updates (eid, date, new_cap, floor, room) values (294, '2019-10-15', 14, 4, 5);
 insert into Updates (eid, date, new_cap, floor, room) values (291, '2019-10-15', 50, 6, 1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
