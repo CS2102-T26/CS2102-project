@@ -88,15 +88,15 @@ $$ LANGUAGE plpgsql;
 -- session has not been approved [DONE]
 -- not over capacity [Swann]
 
-CREATE OR REPLACE FUNCTION check_if_in_approves() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION check_if_not_in_approves() RETURNS TRIGGER AS $$
 DECLARE
-    is_in boolean := NOT EXISTS (SELECT 1
+    is_not_in boolean := NOT EXISTS (SELECT 1
                         FROM Approves a
                         WHERE NEW.time = a.time AND NEW.date = a.date
                         AND NEW.floor = a.floor AND NEW.room = a.room
                         );
 BEGIN
-    IF (is_in = TRUE) THEN RETURN NEW;
+    IF (is_not_in = TRUE) THEN RETURN NEW;
     ELSE RETURN NULL;
     END IF;
 END;
@@ -138,6 +138,7 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- Trigger(s) for leaving meeting; 
 -- check that 
 -- session has not been approved [Le Zong]
+
 
 -- Trigger(s) for booking meeting;
 -- Check that 
