@@ -329,6 +329,19 @@ CREATE TRIGGER manager_not_sr_or_jr
 BEFORE INSERT ON Managers
 FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_jr();
 
+-- C24
+-- updates trigger to check if is manager and dept of manager+room for updating capacity
+CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_mgr BOOLEAN := is_manager(NEW.eid);
+    is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
+BEGIN
+    IF (is_in_mgr = TRUE AND is_mgr_of_dept = TRUE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
 CREATE TRIGGER check_valid_employee_update
 BEFORE INSERT ON Updates
