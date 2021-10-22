@@ -206,10 +206,15 @@ BEGIN
     IF tempTime = end_hour THEN
         LOOP
             EXIT WHEN currTime = end_hour;
+            -- book session
             INSERT INTO Books (eid, time, date, floor, room)
+            VALUES (booker_eid, currTime, book_date, floor_number, room_number);
+            -- person booking joins the meeting
+            INSERT INTO Joins (eid, time, date, floor, room)
             VALUES (booker_eid, currTime, book_date, floor_number, room_number);
             currTime := currTime + '01:00:00';
         END LOOP;
+        
     END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -261,7 +266,8 @@ BEGIN
     -- if tempTime = end_hour; all required sessions are booked
     -- join all
     IF tempTime = end_time THEN
-        WHILE start_time < end_time LOOP
+        LOOP
+            EXIT WHEN start_time = end_time;
             INSERT INTO Joins (eid, time, date, floor, room)
             VALUES (joiner_eid, start_time, join_date, floor_number, room_number);
             start_time := start_time + '01:00:00';
