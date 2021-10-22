@@ -135,7 +135,6 @@ CREATE TABLE Books ( -- c13, c14 need trigger to check if booker is junior, seni
 );
 
 CREATE TABLE Approves ( 
-    -- c20 need check for manager eid
     -- c21 need check for manager dept and meeting room dept
     -- c34 need trigger to check if employee is still active worker
     eid INTEGER NOT NULL, -- c22 add not null constraint
@@ -144,7 +143,7 @@ CREATE TABLE Approves (
     floor INTEGER,
     room INTEGER,
     PRIMARY KEY (time, date, floor, room), -- c22 remove eid so meeting only approved once
-    FOREIGN KEY (eid) REFERENCES Managers,
+    FOREIGN KEY (eid) REFERENCES Managers, -- c20
     FOREIGN KEY (time, date, floor, room) REFERENCES Sessions,
     CHECK (date > CURRENT_DATE OR (date = CURRENT_DATE AND time > CURRENT_TIME)) -- c27 need verify syntax
 );
