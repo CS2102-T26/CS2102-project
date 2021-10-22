@@ -100,6 +100,9 @@ $$ LANGUAGE sql;
 CREATE OR REPLACE PROCEDURE search_room(
     IN capacity INT, IN curr_date DATE, IN start_hour TIME, IN end_hour TIME
 ) AS $$
+BEGIN
+
+END
 $$ LANGUAGE plpgsql;
 
 -- book_room
