@@ -177,14 +177,40 @@ CREATE OR REPLACE PROCEDURE book_room(
     IN start_hour TIME, IN end_hour TIME, IN booker_eid INT
 ) AS $$
 DECLARE
+    -- find number of available sessions for that room
+    -- between start and end hour
+    numSessions INT := (SELECT COUNT(*) 
+                    FROM Sessions S
+                    WHERE S.floor = floor_number
+                    AND S.room = room_number
+                    AND S.date = book_date
+                    AND S.time >= start_hour
+                    AND S.time < end_hour
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM Sessions S JOIN Books B
+                            ON floor_number = B.floor
+                            AND room_number = B.room
+                            AND book_date = B.date
+                            AND S.time = B.time
+                    ));
+    tempTime TIME := start_hour;
     currTime TIME := start_hour;
 BEGIN
-    LOOP
-        EXIT WHEN currTime = end_hour;
-        INSERT INTO Books (eid, time, date, floor, room)
-        VALUES (booker_eid, currTime, book_date, floor_number, room_number);
-        currTime := currTime + '01:00:00';
+    -- if numSessions enough; adding numSessions of 1 hr increments
+    -- will be equal to end_hour; numSessions <= necessary; never over
+    FOR count in 1..numSessions LOOP
+        tempTime := tempTime + '01:00:00'; 
     END LOOP;
+    -- if tempTime = end_hour; add all that can be added
+    IF tempTime = end_hour THEN
+        LOOP
+            EXIT WHEN currTime = end_hour;
+            INSERT INTO Books (eid, time, date, floor, room)
+            VALUES (booker_eid, currTime, book_date, floor_number, room_number);
+            currTime := currTime + '01:00:00';
+        END LOOP;
+    END IF;
 END;
 $$ LANGUAGE plpgsql;
 
