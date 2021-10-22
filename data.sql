@@ -171,8 +171,6 @@ CREATE TRIGGER employee_approving_not_resigned
 BEFORE INSERT OR UPDATE ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
--- insert into juniors is not booker
-CREATE OR REPLACE FUNCTION check_if_booker() RETURNS TRIGGER AS $$
 
 
 
@@ -243,17 +241,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+
+-- C12
 -- insert into seniors is not junior or manager
 CREATE OR REPLACE FUNCTION check_if_jr_or_mgr() RETURNS TRIGGER AS $$
 DECLARE
-    is_in_jr BOOLEAN := EXISTS (SELECT 1
-                        FROM Juniors j
-                        WHERE NEW.eid = j.eid
-                        );
-    is_in_mgr BOOLEAN := EXISTS (SELECT 1
-                        FROM Managers m
-                        WHERE NEW.eid = m.eid
-                        );
+    is_in_jr BOOLEAN := is_junior(NEW.eid);
+    is_in_mgr BOOLEAN := is_manager(NEW.eid);
 BEGIN
     IF (is_in_jr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
     ELSE RETURN NULL;
@@ -261,17 +255,37 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS senior_employee_not_jr_or_mgr ON Seniors;
+CREATE TRIGGER senior_employee_not_jr_or_mgr
+BEFORE INSERT ON Seniors
+FOR EACH ROW EXECUTE FUNCTION check_if_jr_or_mgr();
+
+
+-- C12
+-- insert into juniors is not senior or manager
+CREATE OR REPLACE FUNCTION check_if_sr_or_mgr() RETURNS TRIGGER AS $$
+DECLARE
+    is_in_sr BOOLEAN := is_senior(NEW.eid);
+    is_in_mgr BOOLEAN := is_manager(NEW.eid);
+BEGIN
+    IF (is_in_sr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS junior_employee_not_booker ON Juniors;
+CREATE TRIGGER junior_employee_not_booker
+BEFORE INSERT ON Juniors
+FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_mgr();
+
+
+-- C12
 -- insert into manager is not senior or junior
 CREATE OR REPLACE FUNCTION check_if_sr_or_jr() RETURNS TRIGGER AS $$
 DECLARE
-    is_in_jr BOOLEAN := EXISTS (SELECT 1
-                        FROM Juniors j
-                        WHERE NEW.eid = j.eid
-                        );
-    is_in_sr BOOLEAN := EXISTS (SELECT 1
-                        FROM Seniors s
-                        WHERE NEW.eid = s.eid
-                        );
+    is_in_jr BOOLEAN := is_junior(NEW.eid);
+    is_in_sr BOOLEAN := is_senior(NEW.eid);
 BEGIN
     IF (is_in_jr = FALSE AND is_in_sr = FALSE) THEN RETURN NEW;
     ELSE RETURN NULL;
