@@ -485,16 +485,17 @@ AFTER INSERT ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
 
 --TEST
-insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
-insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
-insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
---should be valid at this point
-SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
-insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
---should display nothing
-SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
--- should display nothing
-SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
+-- insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
+-- insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
+-- insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
+-- should be valid at this point
+-- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
+-- insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
+-- --should display nothing
+-- SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
+-- -- should display nothing
+-- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
 
 
-delete from HealthDeclaration where date = '2021-10-21';
+-- delete from HealthDeclaration where date = '2021-10-21';
+
