@@ -173,15 +173,73 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- insert into juniors is not booker
 CREATE OR REPLACE FUNCTION check_if_booker() RETURNS TRIGGER AS $$
+
+
+
+/**
+ * NON-PROCEDURE RELATED CONSTRAINTS
+ */
+
+
+-- Refactor internal checks for reuse
+-- STORED FUNCTION TO CHECK IF JUNIOR
+CREATE OR REPLACE FUNCTION is_junior(checked_eid INTEGER) 
+RETURNS BOOLEAN AS $$
 DECLARE
-    is_in BOOLEAN := EXISTS (SELECT 1
-                        FROM Bookers b
-                        WHERE NEW.eid = b.eid
-                        );
+    is_in BOOLEAN;
 BEGIN
-    IF (is_in = FALSE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
+    is_in := EXISTS (SELECT 1 FROM Juniors J WHERE checked_eid = J.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF SENIOR
+CREATE OR REPLACE FUNCTION is_senior(checked_eid INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE 
+    is_in BOOLEAN;
+BEGIN
+    is_in := EXISTS (SELECT 1 FROM Seniors S WHERE checked_eid = S.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF MANAGER
+CREATE OR REPLACE FUNCTION is_manager(checked_eid INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE
+    is_in BOOLEAN;
+BEGIN
+    is_in := EXISTS (SELECT 1 FROM Managers M WHERE checked_eid = M.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF BOOKER
+CREATE OR REPLACE FUNCTION is_booker(checked_eid INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE
+    is_in BOOLEAN;
+BEGIN
+    is_in := EXISTS (SELECT 1 FROM Bookers B WHERE checked_eid = B.eid);
+    RETURN is_in;
+END;
+$$ LANGUAGE plpgsql;
+
+-- STORED FUNCTION TO CHECK IF MANAGER OF THAT DEPT
+CREATE OR REPLACE FUNCTION is_manager_of_dept(checked_eid INTEGER, checked_floor INTEGER, checked_room INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE 
+    is_mgr_of_dept BOOLEAN;
+BEGIN
+    is_mgr_of_dept := EXISTS (SELECT 1
+                        FROM LocatedIn l
+                        JOIN WorksIn w
+                        ON l.floor = checked_floor
+                        AND l.room = checked_room
+                        AND l.did = w.did
+                        WHERE checked_eid = w.eid);
+    RETURN is_mgr_of_dept;
 END;
 $$ LANGUAGE plpgsql;
 
