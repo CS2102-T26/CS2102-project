@@ -173,7 +173,7 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- person is still working for company [DONE]
 -- session has not been approved [Le Zong] [already in foreign key]
 -- session has been booked [Le Zong] [DONE]
--- person approving is in the same department as the meeting room [Le Zong]
+-- person approving is in the same department as the meeting room [Le Zong] [DONE]
 
 
 --check if session being approved is booked
@@ -181,6 +181,23 @@ DROP TRIGGER IF EXISTS check_approves_booked_session ON Approves;
 CREATE TRIGGER check_approves_booked_session
 BEFORE INSERT ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
+
+
+CREATE OR REPLACE FUNCTION check_if_approver_same_did() RETURNS TRIGGER AS $$
+DECLARE
+    is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
+BEGIN
+    IF (is_mgr_of_dept = TRUE) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+--check if approver is in the same department as the meeting room 
+DROP TRIGGER IF EXISTS check_approves_same_did ON Approves;
+CREATE TRIGGER check_approves_same_did
+BEFORE INSERT ON Approves 
+FOR EACH ROW EXECUTE FUNCTION check_if_approver_same_did();
 
 
 DROP TRIGGER IF EXISTS employee_approving_not_resigned ON Approves;
