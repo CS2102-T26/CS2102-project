@@ -106,11 +106,12 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS check_join_not_approved_session ON Joins;
 CREATE TRIGGER check_join_not_approved_session
 BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_in_approves();
+FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
 
 
 CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
 DECLARE
+    num_of_rows int := COUNT()
     is_in boolean := EXISTS (SELECT 1
                         FROM Books b
                         WHERE NEW.time = b.time AND NEW.date = b.date
@@ -137,7 +138,14 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- Trigger(s) for leaving meeting; 
 -- check that 
--- session has not been approved [Le Zong]
+-- session has not been approved [Le Zong] [DONE]
+
+-- check that session employee is leaving has not been approved. (if approved, no more changes to ppl inside)
+DROP TRIGGER IF EXISTS check_leave_not_approved_session ON Joins;
+CREATE TRIGGER check_leave_not_approved_session
+BEFORE DELETE ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
+
 
 
 -- Trigger(s) for booking meeting;
@@ -161,11 +169,19 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 
 -- Trigger(s) for approving meetings
 -- Check that 
--- person approving is a manager [Le Zong]
+-- person approving is a manager [Le Zong] [already in foreign key]
 -- person is still working for company [DONE]
--- session has not been approved [Le Zong]
--- session has been booked [Le Zong]
+-- session has not been approved [Le Zong] [already in foreign key]
+-- session has been booked [Le Zong] [DONE]
 -- person approving is in the same department as the meeting room [Le Zong]
+
+
+--check if session being approved is booked
+DROP TRIGGER IF EXISTS check_approves_booked_session ON Approves;
+CREATE TRIGGER check_approves_booked_session
+BEFORE INSERT ON Approves
+FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
+
 
 DROP TRIGGER IF EXISTS employee_approving_not_resigned ON Approves;
 CREATE TRIGGER employee_approving_not_resigned
