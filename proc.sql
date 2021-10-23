@@ -3,8 +3,7 @@
 CREATE OR REPLACE PROCEDURE add_department 
     (did INTEGER, dname TEXT)
 AS $$
-    INSERT INTO Departments (did, dname) 
-    VALUES (did, dname);
+    INSERT INTO Departments (did, dname) VALUES (did, dname);
 
 $$ LANGUAGE sql;
 
@@ -22,7 +21,7 @@ $$ LANGUAGE plpgsql;
 
 --add_room
 CREATE OR REPLACE PROCEDURE add_room
-    (floor INTEGER, room INTEGER, rname TEXT, new_cap INTEGER, eid INTEGER, date DATE)
+    (floor INTEGER, room INTEGER, rname TEXT, new_cap INTEGER, eid INTEGER, did INTEGER, date DATE)
 AS $$
     DECLARE
         added_date DATE := '1999-12-07';
@@ -30,13 +29,14 @@ AS $$
     BEGIN
         INSERT INTO MeetingRooms (floor, room, rname)
         VALUES (floor, room, rname);
+        INSERT INTO LocatedIn VALUES (floor, room, did);
         IF date IS NULL THEN date := added_date;
         END IF;
         IF eid IS NULL THEN eid := added_eid;
         END IF;
         INSERT INTO Updates (eid, date, new_cap, floor, room)
         VALUES (eid, date, new_cap, floor, room);
-        
+
     END;
 $$ LANGUAGE plpgsql;
 
