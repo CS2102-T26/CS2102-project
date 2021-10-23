@@ -7,7 +7,7 @@ CREATE TABLE Employees (
     email TEXT UNIQUE NOT NULL, -- c2, c3
     resign_date DATE, -- c3 (date is NULL if active), c33 use soft delete
     home_number VARCHAR(15),
-    mobile_number VARCHAR(15),
+    mobile_number VARCHAR(15) UNIQUE,
     office_number VARCHAR(15),
     PRIMARY KEY (eid) -- c1
 );
