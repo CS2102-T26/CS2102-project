@@ -99,7 +99,7 @@ $$ LANGUAGE sql;
 -- NEED TO CHANGE
 CREATE OR REPLACE FUNCTION search_room(
     IN search_capacity INT, IN search_date DATE, IN start_hour TIME, IN end_hour TIME
-) RETURNS TABLE(ans_floor INT, ans_room INT, ans_room_did INT, ans_capacity INT)
+) RETURNS TABLE(floor_result INT, room_result INT, did_result INT, capacity_result INT)
 AS $$
 DECLARE
     -- table of all available sessions on that date with correct capacity
@@ -110,8 +110,19 @@ DECLARE
                      ) ON L.floor = S.floor AND L.room = S.room
                      -- Session exists on that date
                      WHERE S.date = search_date
-                     -- Room capacity > search_capacity
-                     AND U.new_cap >= search_capacity
+                     -- search capacity <= most updated capacity for that room
+                     AND search_capacity <= (SELECT u.new_cap FROM Updates u2
+                                            WHERE u2.date <= search_date
+                                            AND u2.floor = S.floor
+                                            AND u2.room = S.room
+                                            ORDER BY u2.date DESC
+                                            LIMIT 1)
+                    AND U.date = (SELECT u3.date FROM Updates u3
+                                    WHERE u3.date <= search_date
+                                    AND u3.floor = S.floor
+                                    AND u3.room = S.room
+                                    ORDER BY u3.date DESC
+                                    LIMIT 1)
                      -- Session unbooked
                      AND NOT EXISTS (
                          SELECT 1
@@ -136,10 +147,10 @@ BEGIN
         -- check if 1 hour slot
         -- if 1 hr slot and curr.time = start_hour means available session
         IF start_hour = end_hour - '01:00:00' THEN
-            ans_floor := curr.floor;
-            ans_room := curr.room;
-            ans_room_did := curr.did;
-            ans_capacity := curr.new_cap;
+            floor_result := curr.floor;
+            room_result := curr.room;
+            did_result := curr.did;
+            capacity_result := curr.new_cap;
             RETURN NEXT;
             CONTINUE;
         END IF;
@@ -153,10 +164,10 @@ BEGIN
             OR NOT FOUND; -- end of table
             -- if next.time = end_hour - 1 => available room found
             IF next.time = end_hour - '01:00:00' THEN
-                ans_floor := curr.floor;
-                ans_room := curr.room;
-                ans_room_did := curr.did;
-                ans_capacity := curr.new_cap;
+                floor_result := curr.floor;
+                room_result := curr.room;
+                did_result := curr.did;
+                capacity_result := curr.new_cap;
                 RETURN NEXT;
             END IF;
             -- increment prevTime
