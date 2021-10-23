@@ -23,7 +23,7 @@ CREATE TABLE WorksIn (
     did INTEGER NOT NULL, -- c8 
     PRIMARY KEY (eid), 
     FOREIGN KEY (eid) REFERENCES Employees,
-    FOREIGN KEY (did) REFERENCES Departments -- c9
+    FOREIGN KEY (did) REFERENCES Departments ON DELETE CASCADE-- c9
 );
 
 CREATE TABLE MeetingRooms (
@@ -40,7 +40,7 @@ CREATE TABLE LocatedIn (
     did INTEGER NOT NULL,
     PRIMARY KEY (floor, room), -- c10, each room, floor can only belong to one did
     FOREIGN KEY(floor, room) REFERENCES MeetingRooms,
-    FOREIGN KEY (did) REFERENCES Departments -- c11
+    FOREIGN KEY (did) REFERENCES Departments ON DELETE CASCADE-- c11
 );
 
 CREATE TABLE Juniors ( -- c12, need trigger to ensure inserted employee is not booker
