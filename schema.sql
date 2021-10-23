@@ -71,7 +71,7 @@ CREATE TABLE Updates (
     -- c24 need trigger to check if is manager and dept of manager+room
     eid INTEGER,
     date DATE,
-    new_cap INTEGER,
+    new_cap INTEGER NOT NULL,
     floor INTEGER,
     room INTEGER,
     PRIMARY KEY (date, floor, room),
