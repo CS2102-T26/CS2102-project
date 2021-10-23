@@ -40,7 +40,7 @@ BEGIN
         AND B1.room = r1.room;
     END LOOP;
     CLOSE curs;
-    RETURN NULL;
+    RETURN NULL; 
 END;
 $$ LANGUAGE plpgsql;
 
@@ -114,7 +114,7 @@ DECLARE
                                 AND NEW.floor = J.floor
                                 AND NEW.room = J.room);
 BEGIN
-    IF (current_capacity < room_max_capacity) THEN RETURN NEW;
+    IF current_capacity < room_max_capacity THEN RETURN NEW;
     END IF;
     RETURN NULL;
 END;
@@ -126,8 +126,7 @@ BEFORE INSERT ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_capacity_before_join();
 
 
-
-CREATE OR REPLACE FUNCTION check_if_not_in_approves() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION check_if_join_not_in_approves() RETURNS TRIGGER AS $$
 DECLARE
     is_not_in boolean := NOT EXISTS (SELECT 1
                         FROM Approves a
@@ -145,7 +144,7 @@ $$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS check_join_not_approved_session ON Joins;
 CREATE TRIGGER check_join_not_approved_session
 BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
+FOR EACH ROW EXECUTE FUNCTION check_if_join_not_in_approves();
 
 
 CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
@@ -178,11 +177,25 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- check that 
 -- session has not been approved [Le Zong] [DONE]
 
+CREATE OR REPLACE FUNCTION check_if_leave_not_in_approves() RETURNS TRIGGER AS $$
+DECLARE
+    is_not_in boolean := NOT EXISTS (SELECT 1
+                        FROM Approves a
+                        WHERE OLD.time = a.time AND OLD.date = a.date
+                        AND OLD.floor = a.floor AND OLD.room = a.room
+                        );
+BEGIN
+    IF (is_not_in = TRUE) THEN RETURN OLD;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
 -- check that session employee is leaving has not been approved. (if approved, no more changes to ppl inside)
 DROP TRIGGER IF EXISTS check_leave_not_approved_session ON Joins;
 CREATE TRIGGER check_leave_not_approved_session
 BEFORE DELETE ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
+FOR EACH ROW EXECUTE FUNCTION check_if_leave_not_in_approves();
 
 
 
@@ -212,7 +225,7 @@ BEGIN
     AND a.date = OLD.date
     AND a.floor = OLD.floor
     AND a.room = OLD.room;
-    RETURN NULL;
+    RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -229,7 +242,7 @@ BEGIN
     AND J.date = OLD.date
     AND J.floor = OLD.floor
     AND J.room = OLD.room;
-    RETURN NULL;
+    RETURN OLD;
 END;
 $$ LANGUAGE plpgsql;
 
