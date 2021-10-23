@@ -111,7 +111,6 @@ FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
 
 CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
 DECLARE
-    num_of_rows int := COUNT()
     is_in boolean := EXISTS (SELECT 1
                         FROM Books b
                         WHERE NEW.time = b.time AND NEW.date = b.date
