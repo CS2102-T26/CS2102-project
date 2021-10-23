@@ -86,7 +86,34 @@ $$ LANGUAGE plpgsql;
 -- session has been booked [DONE]
 -- session has not past [DONE in check constraint]
 -- session has not been approved [DONE]
--- not over capacity [Swann]
+-- not over capacity [Swann/BORY] [DONE]
+
+-- ASSUMING Updates table has been updated to have multiple entries
+CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURN TRIGGER AS $$
+DECLARE
+    room_max_capacity INTEGER := SELECT new_cap FROM Updates U
+                                WHERE U.date <= NEW.date
+                                ORDER BY U.date
+                                LIMIT 1;
+
+    current_capacity INTEGER := SELECT COUNT(*) FROM Joins J 
+                                WHERE NEW.time = J.time
+                                AND NEW.date = J.date
+                                AND NEW.floor = J.floor
+                                AND NEW.room = J.room;
+BEGIN
+    IF (current_capacity < room_max_capacity) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_room_capacity_for_join;
+CREATE TRIGGER check_room_capacity_for_join
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_capacity_before_join();
+
+
 
 CREATE OR REPLACE FUNCTION check_if_not_in_approves() RETURNS TRIGGER AS $$
 DECLARE
@@ -111,7 +138,6 @@ FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
 
 CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
 DECLARE
-    num_of_rows int := COUNT()
     is_in boolean := EXISTS (SELECT 1
                         FROM Books b
                         WHERE NEW.time = b.time AND NEW.date = b.date
@@ -167,6 +193,38 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- if employees joined; removed joined employees [Swann]
 -- employee is still working for company [DONE]
 
+CREATE OR REPLACE FUNCTION delete_from_approves() RETURNS TRIGGER AS $$
+BEGIN
+    DELETE FROM Approves a 
+    WHERE a.time = OLD.time 
+    AND a.date = OLD.date
+    AND a.floor = OLD.floor
+    AND a.room = OLD.room;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS delete_approved_session ON Books;
+CREATE TRIGGER delete_approved_session
+AFTER DELETE ON Books
+FOR EACH ROW EXECUTE FUNCTION delete_from_approves();
+
+CREATE OR REPLACE FUNCTION delete_from_joins() RETURNS TRIGGER AS $$
+BEGIN 
+    DELETE FROM Joins J
+    WHERE j.time = OLD.time 
+    AND j.date = OLD.date
+    AND j.floor = OLD.floor
+    AND j.room = OLD.room;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS delete_joined_session ON Books;
+CREATE TRIGGER delete_joined_session
+AFTER DELETE ON Books
+FOR EACH ROW EXECUTE FUNCTION delete_from_joins();
+
 -- Trigger(s) for approving meetings
 -- Check that 
 -- person approving is a manager [Le Zong] [already in foreign key]
@@ -183,6 +241,8 @@ BEFORE INSERT ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
 
 
+-- C21
+-- Booking approval must be from manager of the dept
 CREATE OR REPLACE FUNCTION check_if_approver_same_did() RETURNS TRIGGER AS $$
 DECLARE
     is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
@@ -356,7 +416,7 @@ FOR EACH ROW EXECUTE FUNCTION check_if_can_book();
 
 -- C24
 -- updates trigger to check if is manager and dept of manager+room for updating capacity
-CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION check_if_mgr_of_dept() RETURNS TRIGGER AS $$
 DECLARE
     is_in_mgr BOOLEAN := is_manager(NEW.eid);
     is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
@@ -367,10 +427,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- C24
 DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
 CREATE TRIGGER check_valid_employee_update
 BEFORE INSERT ON Updates
-FOR EACH ROW EXECUTE FUNCTION check_if_can_update();
+FOR EACH ROW EXECUTE FUNCTION check_if_mgr_of_dept();
 
 -- Due to the pandemic, we have to be vigilant. If an employee is recorded to have a fever at a given day D, a few things
 -- must happen:
@@ -446,6 +507,14 @@ BEFORE INSERT ON Books
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 
 
+-- C19
+-- Prevent any fever employees from joining
+DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
+CREATE TRIGGER check_for_fever_join
+BEFORE INSERT ON Books
+FOR EACH ROW EXECUTE FUNCTION check_for_fever();
+
+
 
 CREATE OR REPLACE FUNCTION remove_contacted_employees_on_fever() RETURNS TRIGGER AS $$
 DECLARE
@@ -487,7 +556,6 @@ BEGIN
 
         -- remove all employees that attended meetings booked by this employee in the past 3 days
         -- from meetings in the next 7 days (Both joining and bookings)
-        -- Note that removing the booker from the booked session currently does nothing, probably need some cascade
         OPEN curs;
         LOOP
             FETCH curs INTO r1;
@@ -522,18 +590,4 @@ CREATE TRIGGER remove_contacted_employees_on_fever
 AFTER INSERT ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
 
---TEST
--- insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
--- insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
--- insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
--- should be valid at this point
--- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
--- insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
--- --should display nothing
--- SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
--- -- should display nothing
--- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
-
-
--- delete from HealthDeclaration where date = '2021-10-21';
 
