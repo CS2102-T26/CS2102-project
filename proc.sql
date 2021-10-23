@@ -41,15 +41,12 @@ AS $$
 $$ LANGUAGE plpgsql;
 
 -- change capacity
--- eid added as only manager can change capacity of the room for that date
+-- Insert new update
 CREATE OR REPLACE PROCEDURE change_capacity(
     IN manager_id INT, IN floor_number INT, IN room_number INT, IN capacity INT, IN new_date DATE
-) AS $$ 
-    UPDATE Updates SET new_cap = capacity,  date = new_date 
-    WHERE room = room_number 
-    AND floor = floor_number
-    AND eid = manager_id
-    ;
+) AS $$  
+    INSERT INTO Updates (eid, date, new_cap, floor, room) 
+    VALUES(manager_id, new_date, capacity, floor_number, room_number);
 $$ LANGUAGE sql;
 
 -- add_employee

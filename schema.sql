@@ -74,7 +74,7 @@ CREATE TABLE Updates (
     new_cap INTEGER,
     floor INTEGER,
     room INTEGER,
-    PRIMARY KEY (eid, date, floor, room),
+    PRIMARY KEY (date, floor, room),
     FOREIGN KEY (eid) REFERENCES Managers,
     FOREIGN KEY (floor, room) REFERENCES MeetingRooms DEFERRABLE INITIALLY DEFERRED
 );

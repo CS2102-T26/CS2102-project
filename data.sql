@@ -1,7 +1,7 @@
 -- Triggers
 
--- Trigger function removing any room booking after capacity update date
--- with number of employees over the new capacity
+-- Trigger function removing any room booked with number of 
+-- employees in meeting over the new capacity after update date
 CREATE OR REPLACE FUNCTION remove_bookings_over_capacity() RETURNS TRIGGER AS $$
 DECLARE
     -- Selects all booked meetings with capacity over new_capacity 
@@ -10,7 +10,7 @@ DECLARE
                     FROM Books B JOIN Joins J 
                         ON B.time = J.time AND B.date = J.date
                            AND B.floor = J.floor AND B.room = J.room
-                    WHERE B.floor = NEW.floor AND B.room = NEW.room and B.date > NEW.new_cap
+                    WHERE B.floor = NEW.floor AND B.room = NEW.room and B.date > NEW.date
                     GROUP BY B.time, B.date, B.floor, B.room
                     HAVING COUNT(J.eid) > NEW.new_cap);
     r1 RECORD;
@@ -32,10 +32,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger to remove all sessions not meeting requirements after cap update
+-- Trigger to remove all sessions not meeting requirements after new cap insert
 DROP TRIGGER IF EXISTS capacity_updated ON Updates;
 CREATE TRIGGER capacity_updated
-AFTER UPDATE ON Updates
+AFTER INSERT ON Updates
 FOR EACH ROW EXECUTE FUNCTION remove_bookings_over_capacity();
 
 
@@ -151,8 +151,8 @@ FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
 -- Trigger(s) for booking meeting;
 -- Check that 
 -- booker is still working for company [DONE]
--- person booking is a Booker [Swann]
--- booker has no fever [Swann]
+-- person booking is a Booker [Done by Yijie]
+-- booker has no fever [Done by Yijie]
 
 DROP TRIGGER IF EXISTS employee_booking_not_resigned ON Books;
 CREATE TRIGGER employee_booking_not_resigned
