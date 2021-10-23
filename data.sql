@@ -86,7 +86,34 @@ $$ LANGUAGE plpgsql;
 -- session has been booked [DONE]
 -- session has not past [DONE in check constraint]
 -- session has not been approved [DONE]
--- not over capacity [Swann]
+-- not over capacity [Swann/BORY] [DONE]
+
+-- ASSUMING Updates table has been updated to have multiple entries
+CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURN TRIGGER AS $$
+DECLARE
+    room_max_capacity INTEGER := SELECT new_cap FROM Updates U
+                                WHERE U.date <= NEW.date
+                                ORDER BY U.date
+                                LIMIT 1;
+
+    current_capacity INTEGER := SELECT COUNT(*) FROM Joins J 
+                                WHERE NEW.time = J.time
+                                AND NEW.date = J.date
+                                AND NEW.floor = J.floor
+                                AND NEW.room = J.room;
+BEGIN
+    IF (current_capacity < room_max_capacity) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_room_capacity_for_join;
+CREATE TRIGGER check_room_capacity_for_join
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_capacity_before_join();
+
+
 
 CREATE OR REPLACE FUNCTION check_if_not_in_approves() RETURNS TRIGGER AS $$
 DECLARE
@@ -111,7 +138,6 @@ FOR EACH ROW EXECUTE FUNCTION check_if_not_in_approves();
 
 CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
 DECLARE
-    num_of_rows int := COUNT()
     is_in boolean := EXISTS (SELECT 1
                         FROM Books b
                         WHERE NEW.time = b.time AND NEW.date = b.date
@@ -215,6 +241,8 @@ BEFORE INSERT ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
 
 
+-- C21
+-- Booking approval must be from manager of the dept
 CREATE OR REPLACE FUNCTION check_if_approver_same_did() RETURNS TRIGGER AS $$
 DECLARE
     is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
@@ -388,7 +416,7 @@ FOR EACH ROW EXECUTE FUNCTION check_if_can_book();
 
 -- C24
 -- updates trigger to check if is manager and dept of manager+room for updating capacity
-CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION check_if_mgr_of_dept() RETURNS TRIGGER AS $$
 DECLARE
     is_in_mgr BOOLEAN := is_manager(NEW.eid);
     is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
@@ -399,10 +427,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- C24
 DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
 CREATE TRIGGER check_valid_employee_update
 BEFORE INSERT ON Updates
-FOR EACH ROW EXECUTE FUNCTION check_if_can_update();
+FOR EACH ROW EXECUTE FUNCTION check_if_mgr_of_dept();
 
 -- Due to the pandemic, we have to be vigilant. If an employee is recorded to have a fever at a given day D, a few things
 -- must happen:
@@ -474,6 +503,14 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS check_for_fever ON Books;
 CREATE TRIGGER check_for_fever
+BEFORE INSERT ON Books
+FOR EACH ROW EXECUTE FUNCTION check_for_fever();
+
+
+-- C19
+-- Prevent any fever employees from joining
+DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
+CREATE TRIGGER check_for_fever_join
 BEFORE INSERT ON Books
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 
