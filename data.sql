@@ -10,7 +10,7 @@ DECLARE
                     FROM Books B JOIN Joins J 
                         ON B.time = J.time AND B.date = J.date
                            AND B.floor = J.floor AND B.room = J.room
-                    WHERE B.floor = NEW.floor AND B.room = NEW.room and B.date > NEW.new_cap
+                    WHERE B.floor = NEW.floor AND B.room = NEW.room and B.date > NEW.date
                     GROUP BY B.time, B.date, B.floor, B.room
                     HAVING COUNT(J.eid) > NEW.new_cap);
     r1 RECORD;
@@ -506,15 +506,12 @@ CREATE TRIGGER check_for_fever
 BEFORE INSERT ON Books
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 
-
 -- C19
 -- Prevent any fever employees from joining
 DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
 CREATE TRIGGER check_for_fever_join
 BEFORE INSERT ON Books
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
-
-
 
 CREATE OR REPLACE FUNCTION remove_contacted_employees_on_fever() RETURNS TRIGGER AS $$
 DECLARE
@@ -524,31 +521,46 @@ DECLARE
             Joins j1 JOIN Joins j2
             ON j2.eid = NEW.eid
             AND j2.date < NEW.date
-            AND j2.date >= NEW.date 
+            AND j2.date >= NEW.date - 3
             AND j2.time = j1.time
             AND j2.date = j1.date
             AND j2.floor = j1.floor
             AND j2.room = j1.room
+            JOIN Approves a
+            ON j2.date = a.date
+            AND j2.time = a.time
+            AND j2.floor = a.floor
+            AND j2.room = a.room
             UNION
             SELECT b.eid FROM
             Books b JOIN Joins j
             ON j.eid = NEW.eid
             AND j.date < NEW.date
-            AND j.date >= NEW.date 
+            AND j.date >= NEW.date - 3
             AND j.time = b.time
             AND j.date = b.date
             AND j.floor = b.floor
             AND j.room = b.room
+            JOIN Approves a
+            ON j.date = a.date
+            AND j.time = a.time
+            AND j.floor = a.floor
+            AND j.room = a.room
             UNION
             SELECT j.eid FROM
             Joins j JOIN Books b
             ON b.eid = NEW.eid
             AND b.date < NEW.date
-            AND b.date >= NEW.date 
+            AND b.date >= NEW.date - 3
             AND j.time = b.time
             AND j.date = b.date
             AND j.floor = b.floor
-            AND j.room = b.room);
+            AND j.room = b.room
+            JOIN Approves a
+            ON j.date = a.date
+            AND j.time = a.time
+            AND j.floor = a.floor
+            AND j.room = a.room);
     r1 RECORD;
     
 BEGIN
@@ -562,7 +574,7 @@ BEGIN
             EXIT WHEN NOT FOUND;
             DELETE FROM Joins j1
             WHERE r1.eid = j1.eid
-            AND j1.date > NEW.date
+            AND j1.date >= NEW.date
             AND j1.date <= NEW.date + 7;
         END LOOP;
         LOOP
@@ -570,7 +582,7 @@ BEGIN
             EXIT WHEN NOT FOUND;
             DELETE FROM Books b1
             WHERE r1.eid = b1.eid
-            AND b1.date > NEW.date
+            AND b1.date >= NEW.date
             AND b1.date <= NEW.date + 7;
         END LOOP;
         CLOSE curs;
@@ -589,5 +601,3 @@ DROP TRIGGER IF EXISTS remove_contacted_employees_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_contacted_employees_on_fever
 AFTER INSERT ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
-
-
