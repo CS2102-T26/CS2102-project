@@ -167,6 +167,38 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- if employees joined; removed joined employees [Swann]
 -- employee is still working for company [DONE]
 
+CREATE OR REPLACE FUNCTION delete_from_approves() RETURNS TRIGGER AS $$
+BEGIN
+    DELETE FROM Approves a 
+    WHERE a.time = OLD.time 
+    AND a.date = OLD.date
+    AND a.floor = OLD.floor
+    AND a.room = OLD.room;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS delete_approved_session ON Books;
+CREATE TRIGGER delete_approved_session
+AFTER DELETE ON Books
+FOR EACH ROW EXECUTE FUNCTION delete_from_approves();
+
+CREATE OR REPLACE FUNCTION delete_from_joins() RETURNS TRIGGER AS $$
+BEGIN 
+    DELETE FROM Joins J
+    WHERE j.time = OLD.time 
+    AND j.date = OLD.date
+    AND j.floor = OLD.floor
+    AND j.room = OLD.room;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS delete_joined_session ON Books;
+CREATE TRIGGER delete_joined_session
+AFTER DELETE ON Books
+FOR EACH ROW EXECUTE FUNCTION delete_from_joins();
+
 -- Trigger(s) for approving meetings
 -- Check that 
 -- person approving is a manager [Le Zong] [already in foreign key]
@@ -487,7 +519,6 @@ BEGIN
 
         -- remove all employees that attended meetings booked by this employee in the past 3 days
         -- from meetings in the next 7 days (Both joining and bookings)
-        -- Note that removing the booker from the booked session currently does nothing, probably need some cascade
         OPEN curs;
         LOOP
             FETCH curs INTO r1;
@@ -522,18 +553,4 @@ CREATE TRIGGER remove_contacted_employees_on_fever
 AFTER INSERT ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
 
---TEST
--- insert into Sessions (time, date, floor, room) values ('16:00:00', '2021-10-24', 2, 4);
--- insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2021-10-24', 2, 4);
--- insert into Joins (eid, time, date, floor, room) values (111, '16:00:00', '2021-10-24', 2, 4);
--- should be valid at this point
--- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
--- insert into HealthDeclaration(date, temp, eid) values ('2021-10-21', '37.6', 299);
--- --should display nothing
--- SELECT * FROM Books WHERE eid = '299' AND date > CURRENT_DATE;
--- -- should display nothing
--- SELECT * FROM Joins WHERE time = '16:00:00' AND date = '2021-10-24' AND floor = 2 AND room = 4;
-
-
--- delete from HealthDeclaration where date = '2021-10-21';
 
