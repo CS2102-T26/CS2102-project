@@ -41,7 +41,7 @@ AS $$
 $$ LANGUAGE plpgsql;
 
 -- change capacity
--- Insert new update
+-- Insert new update; allow multiple updates
 CREATE OR REPLACE PROCEDURE change_capacity(
     IN manager_id INT, IN floor_number INT, IN room_number INT, IN capacity INT, IN new_date DATE
 ) AS $$  
