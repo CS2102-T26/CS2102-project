@@ -96,6 +96,7 @@ $$ LANGUAGE sql;
 -- search_room
 -- search and all rooms more than stated capacity within 
 -- start_hour and end_hour that are unbooked 
+-- NEED TO CHANGE
 CREATE OR REPLACE FUNCTION search_room(
     IN search_capacity INT, IN search_date DATE, IN start_hour TIME, IN end_hour TIME
 ) RETURNS TABLE(ans_floor INT, ans_room INT, ans_room_did INT, ans_capacity INT)

@@ -3,14 +3,26 @@
 -- Trigger function removing any room booked with number of 
 -- employees in meeting over the new capacity after update date
 CREATE OR REPLACE FUNCTION remove_bookings_over_capacity() RETURNS TRIGGER AS $$
-DECLARE
+DECLARE 
+    -- select upper bound date; furthest update date for that room
+    upperBoundDate DATE := (SELECT MAX(U.date) 
+                            FROM Updates U
+                            WHERE U.floor = NEW.floor
+                            AND U.room = NEW.room);
     -- Selects all booked meetings with capacity over new_capacity 
     -- for room where capacity was changed
     curs CURSOR FOR (SELECT B.time, B.date, B.floor, B.room, COUNT(J.eid)
                     FROM Books B JOIN Joins J 
                         ON B.time = J.time AND B.date = J.date
                            AND B.floor = J.floor AND B.room = J.room
-                    WHERE B.floor = NEW.floor AND B.room = NEW.room and B.date > NEW.date
+                    WHERE B.floor = NEW.floor AND B.room = NEW.room 
+                    AND (
+                    -- new updated date is new max date; find all bookings after this date
+                    (NEW.date >= upperBoundDate AND B.date >= NEW.date)
+                     OR 
+                    -- new updated date is before curr max date; find all booking in between
+                    (NEW.date <= upperBoundDate AND B.date >= NEW.date AND B.date < upperBoundDate)
+                    )
                     GROUP BY B.time, B.date, B.floor, B.room
                     HAVING COUNT(J.eid) > NEW.new_cap);
     r1 RECORD;
@@ -86,29 +98,29 @@ $$ LANGUAGE plpgsql;
 -- session has been booked [DONE]
 -- session has not past [DONE in check constraint]
 -- session has not been approved [DONE]
--- not over capacity [Swann/BORY] [DONE]
+-- not over capacity [BORY] [DONE]
 
 -- ASSUMING Updates table has been updated to have multiple entries
-CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURN TRIGGER AS $$
+CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
 DECLARE
-    room_max_capacity INTEGER := SELECT new_cap FROM Updates U
+    room_max_capacity INTEGER := (SELECT U.new_cap FROM Updates U
                                 WHERE U.date <= NEW.date
-                                ORDER BY U.date
-                                LIMIT 1;
+                                ORDER BY U.date DESC
+                                LIMIT 1);
 
-    current_capacity INTEGER := SELECT COUNT(*) FROM Joins J 
+    current_capacity INTEGER := (SELECT COUNT(*) FROM Joins J 
                                 WHERE NEW.time = J.time
                                 AND NEW.date = J.date
                                 AND NEW.floor = J.floor
-                                AND NEW.room = J.room;
+                                AND NEW.room = J.room);
 BEGIN
     IF (current_capacity < room_max_capacity) THEN RETURN NEW;
-    ELSE RETURN NULL;
     END IF;
+    RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS check_room_capacity_for_join;
+DROP TRIGGER IF EXISTS check_room_capacity_for_join ON Joins;
 CREATE TRIGGER check_room_capacity_for_join
 BEFORE INSERT ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_capacity_before_join();
@@ -189,8 +201,8 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- Check that 
 -- employee is still working for company [DONE]: once employee resigned, all meetings
     -- booked by him after resign date are unbooked automatically; trigger on top
--- if approved; remove approval [Swann]
--- if employees joined; removed joined employees [Swann]
+-- if approved; remove approval [Yijie] [DONE]
+-- if employees joined; removed joined employees [Yijie] [DONE]
 -- employee is still working for company [DONE]
 
 CREATE OR REPLACE FUNCTION delete_from_approves() RETURNS TRIGGER AS $$
@@ -209,13 +221,14 @@ CREATE TRIGGER delete_approved_session
 AFTER DELETE ON Books
 FOR EACH ROW EXECUTE FUNCTION delete_from_approves();
 
+-- need to check
 CREATE OR REPLACE FUNCTION delete_from_joins() RETURNS TRIGGER AS $$
 BEGIN 
     DELETE FROM Joins J
-    WHERE j.time = OLD.time 
-    AND j.date = OLD.date
-    AND j.floor = OLD.floor
-    AND j.room = OLD.room;
+    WHERE J.time = OLD.time 
+    AND J.date = OLD.date
+    AND J.floor = OLD.floor
+    AND J.room = OLD.room;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
