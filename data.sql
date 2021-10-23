@@ -214,6 +214,8 @@ BEFORE INSERT ON Approves
 FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
 
 
+-- C21
+-- Booking approval must be from manager of the dept
 CREATE OR REPLACE FUNCTION check_if_approver_same_did() RETURNS TRIGGER AS $$
 DECLARE
     is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
@@ -387,7 +389,7 @@ FOR EACH ROW EXECUTE FUNCTION check_if_can_book();
 
 -- C24
 -- updates trigger to check if is manager and dept of manager+room for updating capacity
-CREATE OR REPLACE FUNCTION check_if_can_update() RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION check_if_mgr_of_dept() RETURNS TRIGGER AS $$
 DECLARE
     is_in_mgr BOOLEAN := is_manager(NEW.eid);
     is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
@@ -398,10 +400,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- C24
 DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
 CREATE TRIGGER check_valid_employee_update
 BEFORE INSERT ON Updates
-FOR EACH ROW EXECUTE FUNCTION check_if_can_update();
+FOR EACH ROW EXECUTE FUNCTION check_if_mgr_of_dept();
 
 -- Due to the pandemic, we have to be vigilant. If an employee is recorded to have a fever at a given day D, a few things
 -- must happen:
@@ -480,7 +483,7 @@ FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 -- C19
 -- Prevent any fever employees from joining
 DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
-CREATE TRIGGER IF EXISTS check_for_fever_join
+CREATE TRIGGER check_for_fever_join
 BEFORE INSERT ON Books
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 
