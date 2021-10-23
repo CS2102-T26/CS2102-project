@@ -86,7 +86,34 @@ $$ LANGUAGE plpgsql;
 -- session has been booked [DONE]
 -- session has not past [DONE in check constraint]
 -- session has not been approved [DONE]
--- not over capacity [Swann]
+-- not over capacity [Swann/BORY] [DONE]
+
+-- ASSUMING Updates table has been updated to have multiple entries
+CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURN TRIGGER AS $$
+DECLARE
+    room_max_capacity INTEGER := SELECT new_cap FROM Updates U
+                                WHERE U.date <= NEW.date
+                                ORDER BY U.date
+                                LIMIT 1;
+
+    current_capacity INTEGER := SELECT COUNT(*) FROM Joins J 
+                                WHERE NEW.time = J.time
+                                AND NEW.date = J.date
+                                AND NEW.floor = J.floor
+                                AND NEW.room = J.room;
+BEGIN
+    IF (current_capacity < room_max_capacity) THEN RETURN NEW;
+    ELSE RETURN NULL;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_room_capacity_for_join;
+CREATE TRIGGER check_room_capacity_for_join
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_capacity_before_join();
+
+
 
 CREATE OR REPLACE FUNCTION check_if_not_in_approves() RETURNS TRIGGER AS $$
 DECLARE
