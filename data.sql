@@ -536,7 +536,7 @@ FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 -- Prevent any fever employees from joining
 DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
 CREATE TRIGGER check_for_fever_join
-BEFORE INSERT ON Books
+BEFORE INSERT ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 
 CREATE OR REPLACE FUNCTION remove_contacted_employees_on_fever() RETURNS TRIGGER AS $$
