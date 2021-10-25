@@ -212,8 +212,8 @@ DECLARE
                     AND S.time < end_hour
                     AND NOT EXISTS (
                         SELECT 1
-                        FROM Sessions S JOIN Books B
-                            ON floor_number = B.floor
+                        FROM Books B
+                            WHERE floor_number = B.floor
                             AND room_number = B.room
                             AND book_date = B.date
                             AND S.time = B.time
