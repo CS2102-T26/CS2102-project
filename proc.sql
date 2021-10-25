@@ -45,9 +45,24 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE PROCEDURE change_capacity(
     IN manager_id INT, IN floor_number INT, IN room_number INT, IN capacity INT, IN new_date DATE
 ) AS $$  
-    INSERT INTO Updates (eid, date, new_cap, floor, room) 
-    VALUES(manager_id, new_date, capacity, floor_number, room_number);
-$$ LANGUAGE sql;
+DECLARE
+    update_count INT;
+BEGIN 
+    update_count := (SELECT COUNT(*) FROM Updates U 
+                    WHERE U.date = new_date 
+                    AND U.floor = floor_number 
+                    AND U.room = room_number);
+    IF (update_count > 0) THEN
+        UPDATE Updates U SET eid = manager_id, new_cap = capacity
+            WHERE U.date = new_date
+            AND U.floor = floor_number 
+            AND U.room = room_number;
+    ELSE 
+        INSERT INTO Updates (eid, date, new_cap, floor, room) 
+        VALUES(manager_id, new_date, capacity, floor_number, room_number);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 -- add_employee
 CREATE OR REPLACE PROCEDURE add_employee(
