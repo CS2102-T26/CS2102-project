@@ -511,7 +511,7 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_on_fever
-AFTER INSERT ON HealthDeclaration
+AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
 
 CREATE OR REPLACE FUNCTION check_for_fever() RETURNS TRIGGER AS $$
@@ -620,10 +620,10 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_on_fever
-AFTER INSERT ON HealthDeclaration
+AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
 
 DROP TRIGGER IF EXISTS remove_contacted_employees_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_contacted_employees_on_fever
-AFTER INSERT ON HealthDeclaration
+AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();

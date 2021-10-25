@@ -337,11 +337,22 @@ $$ LANGUAGE plpgsql;
 -- HEALTH 
 -- declare_health
 CREATE OR REPLACE PROCEDURE declare_health
-    (eid INTEGER, date DATE, temperature NUMERIC)
+    (employee_id INTEGER, declared_date DATE, declared_temperature NUMERIC)
 AS $$
-    INSERT INTO HealthDeclaration (date, temp, eid)
-    VALUES (date, temperature, eid)
-$$ LANGUAGE sql;
+DECLARE
+    is_updated BOOLEAN := EXISTS (SELECT 1 FROM HealthDeclaration H
+                            WHERE H.eid = employee_id
+                            AND H.date = declared_date);
+BEGIN
+    IF (is_updated) THEN
+        UPDATE HealthDeclaration SET temp = declared_temperature
+            WHERE eid = employee_id AND date = declared_date;
+    ELSE
+        INSERT INTO HealthDeclaration (date, temp, eid)
+        VALUES (declared_date, declared_temperature, employee_id);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 -- contact_tracing
 
