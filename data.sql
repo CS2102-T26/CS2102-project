@@ -47,7 +47,7 @@ $$ LANGUAGE plpgsql;
 -- Trigger to remove all sessions not meeting requirements after new cap insert
 DROP TRIGGER IF EXISTS capacity_updated ON Updates;
 CREATE TRIGGER capacity_updated
-AFTER INSERT ON Updates
+AFTER INSERT OR UPDATE ON Updates
 FOR EACH ROW EXECUTE FUNCTION remove_bookings_over_capacity();
 
 
@@ -456,7 +456,7 @@ $$ LANGUAGE plpgsql;
 -- C24
 DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
 CREATE TRIGGER check_valid_employee_update
-BEFORE INSERT ON Updates
+BEFORE INSERT OR UPDATE ON Updates
 FOR EACH ROW EXECUTE FUNCTION check_if_mgr_of_dept();
 
 -- Due to the pandemic, we have to be vigilant. If an employee is recorded to have a fever at a given day D, a few things
@@ -511,7 +511,7 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_on_fever
-AFTER INSERT ON HealthDeclaration
+AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
 
 CREATE OR REPLACE FUNCTION check_for_fever() RETURNS TRIGGER AS $$
@@ -536,7 +536,7 @@ FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 -- Prevent any fever employees from joining
 DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
 CREATE TRIGGER check_for_fever_join
-BEFORE INSERT ON Books
+BEFORE INSERT ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_for_fever();
 
 CREATE OR REPLACE FUNCTION remove_contacted_employees_on_fever() RETURNS TRIGGER AS $$
@@ -620,10 +620,10 @@ $$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_on_fever
-AFTER INSERT ON HealthDeclaration
+AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
 
 DROP TRIGGER IF EXISTS remove_contacted_employees_on_fever ON HealthDeclaration;
 CREATE TRIGGER remove_contacted_employees_on_fever
-AFTER INSERT ON HealthDeclaration
+AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
