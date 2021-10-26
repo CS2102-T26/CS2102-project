@@ -101,6 +101,25 @@ $$ LANGUAGE plpgsql;
 -- not over capacity [BORY] [DONE]
 -- cannot join meeting to different rooms at same time [Swann]
 
+CREATE OR REPLACE FUNCTION check_time_clash_before_join() RETURNS TRIGGER AS $$
+DECLARE
+BEGIN
+    IF EXISTS(SELECT 1
+            FROM joins j
+            WHERE j.eid = NEW.eid
+            AND j.time = NEW.time
+            AND j.date = NEW.date)  
+            THEN RETURN NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_time_clash_for_join ON Joins;
+CREATE TRIGGER check_time_clash_for_join
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_time_clash_before_join();
+
 -- ASSUMING Updates table has been updated to have multiple entries
 CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
 DECLARE
@@ -199,8 +218,11 @@ CREATE TRIGGER check_leave_not_approved_session
 BEFORE DELETE ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_if_leave_not_in_approves();
 
+<<<<<<< HEAD
 -- Funtion to check if person who just left the meeting is a booker
 -- if is booker, just delete from books
+=======
+>>>>>>> caf558a2724c695c0812832c4eb619012ec29752
 CREATE OR REPLACE FUNCTION check_if_booker_left() RETURNS TRIGGER AS $$
 DECLARE
     -- check if for eid of tuple being deleted from joins, is booker for meeting
