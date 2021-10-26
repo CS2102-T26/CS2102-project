@@ -99,6 +99,7 @@ $$ LANGUAGE plpgsql;
 -- session has not past [DONE in check constraint]
 -- session has not been approved [DONE]
 -- not over capacity [BORY] [DONE]
+-- cannot join meeting to different rooms at same time [Swann]
 
 -- ASSUMING Updates table has been updated to have multiple entries
 CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
