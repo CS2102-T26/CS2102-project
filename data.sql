@@ -100,6 +100,25 @@ $$ LANGUAGE plpgsql;
 -- session has not been approved [DONE]
 -- not over capacity [BORY] [DONE]
 
+CREATE OR REPLACE FUNCTION check_time_clash_before_join() RETURNS TRIGGER AS $$
+DECLARE
+BEGIN
+    IF EXISTS(SELECT 1
+            FROM joins j
+            WHERE j.eid = NEW.eid
+            AND j.time = NEW.time
+            AND j.date = NEW.date)  
+            THEN RETURN NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_time_clash_for_join ON Joins;
+CREATE TRIGGER check_time_clash_for_join
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_time_clash_before_join();
+
 -- ASSUMING Updates table has been updated to have multiple entries
 CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
 DECLARE
