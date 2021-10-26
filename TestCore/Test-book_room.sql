@@ -22,3 +22,5 @@ CALL book_room(2, 1, current_date + 1, '16:00:00', '17:00:00', 277);
 
 -- EXPECTED FAIL (RESIGNED SENIOR)
 CALL book_room(2, 2, '2022-10-26', '18:00:00', '19:00:00', 285); -- senior
+
+SELECT * FROM Books ORDER BY date, time;
