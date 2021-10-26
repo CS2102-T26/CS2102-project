@@ -9,35 +9,44 @@ $$ LANGUAGE sql;
 
 --remove_department
 CREATE OR REPLACE PROCEDURE remove_department
-    (did INTEGER)
+    (input_did INTEGER)
 AS $$
-    DECLARE
-        input_did INTEGER := did;
-    BEGIN
+DECLARE
+    num_of_employees_in_dept INTEGER := (SELECT COUNT(*) FROM WorksIn WHERE did = input_did);
+    num_of_employees_resigned_in_dept INTEGER := (SELECT COUNT(*) FROM WorksIn W
+                                                    NATURAL JOIN Employees E
+                                                    WHERE W.did = input_did
+                                                    AND E.resign_date IS NOT NULL);
+    num_of_rooms_in_dept INTEGER := (SELECT COUNT(*) FROM LocatedIn WHERE did = input_did);
+BEGIN
+    IF ((num_of_employees_in_dept = 0 
+        OR num_of_employees_in_dept = num_of_employees_resigned_in_dept)
+        AND num_of_rooms_in_dept = 0) THEN
         DELETE FROM Departments d
         WHERE input_did = d.did;
-    END;
+    END IF;
+END;
 $$ LANGUAGE plpgsql;
 
 --add_room
 CREATE OR REPLACE PROCEDURE add_room
     (floor INTEGER, room INTEGER, rname TEXT, new_cap INTEGER, eid INTEGER, did INTEGER, date DATE)
 AS $$
-    DECLARE
-        added_date DATE := '1999-12-07';
-        added_eid INTEGER := 0;
-    BEGIN
-        INSERT INTO MeetingRooms (floor, room, rname)
-        VALUES (floor, room, rname);
-        INSERT INTO LocatedIn VALUES (floor, room, did);
-        IF date IS NULL THEN date := added_date;
-        END IF;
-        IF eid IS NULL THEN eid := added_eid;
-        END IF;
-        INSERT INTO Updates (eid, date, new_cap, floor, room)
-        VALUES (eid, date, new_cap, floor, room);
+DECLARE
+    added_date DATE := '1999-12-07';
+    added_eid INTEGER := 0;
+BEGIN
+    INSERT INTO MeetingRooms (floor, room, rname)
+    VALUES (floor, room, rname);
+    INSERT INTO LocatedIn VALUES (floor, room, did);
+    IF date IS NULL THEN date := added_date;
+    END IF;
+    IF eid IS NULL THEN eid := added_eid;
+    END IF;
+    INSERT INTO Updates (eid, date, new_cap, floor, room)
+    VALUES (eid, date, new_cap, floor, room);
 
-    END;
+END;
 $$ LANGUAGE plpgsql;
 
 -- change capacity
