@@ -176,6 +176,7 @@ FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
 -- Trigger(s) for leaving meeting; 
 -- check that 
 -- session has not been approved [Le Zong] [DONE]
+-- if booker leaves the meeting; meeting is cancelled => delete from books [Swann]
 
 CREATE OR REPLACE FUNCTION check_if_leave_not_in_approves() RETURNS TRIGGER AS $$
 DECLARE
@@ -197,6 +198,35 @@ CREATE TRIGGER check_leave_not_approved_session
 BEFORE DELETE ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_if_leave_not_in_approves();
 
+-- Funtion to check if person who just left the meeting is a booker
+-- if is booker, just delete from books
+CREATE OR REPLACE FUNCTION check_if_booker_left() RETURNS TRIGGER AS $$
+DECLARE
+    -- check if for eid of tuple being deleted from joins, is booker for meeting
+    session_booker_id INT := (SELECT B.eid
+                              FROM Books B 
+                              WHERE B.time = OLD.time
+                              AND B.date = OLD.date
+                              AND B.floor = OLD.floor
+                              AND B.room = OLD.room);
+BEGIN
+    IF (session_booker_id = OLD.eid) THEN 
+        DELETE FROM Books 
+        WHERE eid = OLD.eid
+        AND time = OLD.time
+        AND date = OLD.date
+        AND floor = OLD.floor
+        AND room = OLD.room;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger checked each time someone leaves a meeting
+DROP TRIGGER IF EXISTS booker_leave_meeting ON Joins;
+CREATE TRIGGER booker_leave_meeting 
+AFTER DELETE ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_if_booker_left();
 
 
 -- Trigger(s) for booking meeting;
