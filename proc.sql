@@ -364,6 +364,68 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- contact_tracing
+CREATE OR REPLACE FUNCTION contact_tracing(employee_id INTEGER) RETURNS TABLE (employee_id2 INTEGER) AS $$
+DECLARE
+    has_fever BOOLEAN := ((SELECT temp
+                        FROM HealthDeclaration WHERE eid = employee_id
+                        ORDER BY date DESC
+                        LIMIT 1) > 37.5);
+    fever_date DATE := ((SELECT date
+                        FROM HealthDeclaration WHERE eid = employee_id AND temp > 37.5
+                        ORDER BY date DESC
+                        LIMIT 1));
+BEGIN
+    IF (has_fever) THEN
+        RETURN QUERY
+            SELECT j1.eid FROM
+            Joins j1 JOIN Joins j2
+            ON j2.eid = employee_id
+            AND j2.date < fever_date
+            AND j2.date >= fever_date - 3
+            AND j2.time = j1.time
+            AND j2.date = j1.date
+            AND j2.floor = j1.floor
+            AND j2.room = j1.room
+            JOIN Approves a
+            ON j2.date = a.date
+            AND j2.time = a.time
+            AND j2.floor = a.floor
+            AND j2.room = a.room
+            UNION
+            SELECT b.eid FROM
+            Books b JOIN Joins j
+            ON j.eid = employee_id
+            AND j.date < fever_date
+            AND j.date >= fever_date - 3
+            AND j.time = b.time
+            AND j.date = b.date
+            AND j.floor = b.floor
+            AND j.room = b.room
+            JOIN Approves a
+            ON j.date = a.date
+            AND j.time = a.time
+            AND j.floor = a.floor
+            AND j.room = a.room
+            UNION
+            SELECT j.eid FROM
+            Joins j JOIN Books b
+            ON b.eid = employee_id
+            AND b.date < fever_date
+            AND b.date >= fever_date - 3
+            AND j.time = b.time
+            AND j.date = b.date
+            AND j.floor = b.floor
+            AND j.room = b.room
+            JOIN Approves a
+            ON j.date = a.date
+            AND j.time = a.time
+            AND j.floor = a.floor
+            AND j.room = a.room;
+        ELSE
+            RETURN;
+        END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 
 -- ADMIN 
