@@ -7,7 +7,7 @@ select * from search_room(1, '2022-10-26', '16:00:00', '19:00:00');
 -- Test with change_capacity, make sure is ascending
 call change_capacity(298, 4, 1, 15, current_date);
 select * from search_room(3, current_date + 1, '16:00:00', '19:00:00');
-call change_capacity(299, 2, 2, 10, current_date);
+call change_capacity(304, 2, 2, 10, current_date);
 select * from search_room(3, current_date + 1, '16:00:00', '19:00:00');
 call change_capacity(298, 4, 1, 5, current_date);
 select * from search_room(3, current_date + 1, '16:00:00', '19:00:00');
