@@ -227,6 +227,13 @@ DECLARE
                             AND book_date = B.date
                             AND S.time = B.time
                     ));
+    isClash boolean := EXISTS(SELECT 1
+            FROM Joins j
+            WHERE j.eid = booker_eid
+            AND j.time >= start_hour
+            AND j.time < end_hour
+            AND j.date = book_date);  
+            
     tempTime TIME := start_hour;
     currTime TIME := start_hour;
 BEGIN
@@ -236,7 +243,7 @@ BEGIN
         tempTime := tempTime + '01:00:00'; 
     END LOOP;
     -- if tempTime = end_hour; add all that can be added
-    IF tempTime = end_hour THEN
+    IF (tempTime = end_hour AND NOT isClash) THEN
         LOOP
             EXIT WHEN currTime = end_hour;
             -- book session

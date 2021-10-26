@@ -100,6 +100,25 @@ $$ LANGUAGE plpgsql;
 -- session has not been approved [DONE]
 -- not over capacity [BORY] [DONE]
 
+CREATE OR REPLACE FUNCTION check_time_clash_before_join() RETURNS TRIGGER AS $$
+DECLARE
+BEGIN
+    IF EXISTS(SELECT 1
+            FROM joins j
+            WHERE j.eid = NEW.eid
+            AND j.time = NEW.time
+            AND j.date = NEW.date)  
+            THEN RETURN NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_time_clash_for_join ON Joins;
+CREATE TRIGGER check_time_clash_for_join
+BEFORE INSERT ON Joins
+FOR EACH ROW EXECUTE FUNCTION check_time_clash_before_join();
+
 -- ASSUMING Updates table has been updated to have multiple entries
 CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
 DECLARE
@@ -204,6 +223,26 @@ FOR EACH ROW EXECUTE FUNCTION check_if_leave_not_in_approves();
 -- booker is still working for company [DONE]
 -- person booking is a Booker [Done by Yijie]
 -- booker has no fever [Done by Yijie]
+
+-- CREATE OR REPLACE FUNCTION check_time_clash_before_book() RETURNS TRIGGER AS $$
+-- DECLARE
+-- BEGIN
+--     IF EXISTS(SELECT 1
+--             FROM Joins j
+--             WHERE j.eid = NEW.eid
+--             AND j.time = NEW.time
+--             AND j.date = NEW.date)  
+--             THEN RETURN NULL;
+--     END IF;
+--     RETURN NEW;
+-- END;
+-- $$ LANGUAGE plpgsql;
+
+-- DROP TRIGGER IF EXISTS check_time_clash_for_book ON Books;
+-- CREATE TRIGGER check_time_clash_for_book
+-- BEFORE INSERT ON Books
+-- FOR EACH ROW EXECUTE FUNCTION check_time_clash_before_book();
+
 
 DROP TRIGGER IF EXISTS employee_booking_not_resigned ON Books;
 CREATE TRIGGER employee_booking_not_resigned
