@@ -45,9 +45,24 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE PROCEDURE change_capacity(
     IN manager_id INT, IN floor_number INT, IN room_number INT, IN capacity INT, IN new_date DATE
 ) AS $$  
-    INSERT INTO Updates (eid, date, new_cap, floor, room) 
-    VALUES(manager_id, new_date, capacity, floor_number, room_number);
-$$ LANGUAGE sql;
+DECLARE
+    update_count INT;
+BEGIN 
+    update_count := (SELECT COUNT(*) FROM Updates U 
+                    WHERE U.date = new_date 
+                    AND U.floor = floor_number 
+                    AND U.room = room_number);
+    IF (update_count > 0) THEN
+        UPDATE Updates U SET eid = manager_id, new_cap = capacity
+            WHERE U.date = new_date
+            AND U.floor = floor_number 
+            AND U.room = room_number;
+    ELSE 
+        INSERT INTO Updates (eid, date, new_cap, floor, room) 
+        VALUES(manager_id, new_date, capacity, floor_number, room_number);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 -- add_employee
 CREATE OR REPLACE PROCEDURE add_employee(
@@ -197,8 +212,8 @@ DECLARE
                     AND S.time < end_hour
                     AND NOT EXISTS (
                         SELECT 1
-                        FROM Sessions S JOIN Books B
-                            ON floor_number = B.floor
+                        FROM Books B
+                            WHERE floor_number = B.floor
                             AND room_number = B.room
                             AND book_date = B.date
                             AND S.time = B.time
@@ -322,11 +337,22 @@ $$ LANGUAGE plpgsql;
 -- HEALTH 
 -- declare_health
 CREATE OR REPLACE PROCEDURE declare_health
-    (eid INTEGER, date DATE, temperature NUMERIC)
+    (employee_id INTEGER, declared_date DATE, declared_temperature NUMERIC)
 AS $$
-    INSERT INTO HealthDeclaration (date, temp, eid)
-    VALUES (date, temperature, eid)
-$$ LANGUAGE sql;
+DECLARE
+    is_updated BOOLEAN := EXISTS (SELECT 1 FROM HealthDeclaration H
+                            WHERE H.eid = employee_id
+                            AND H.date = declared_date);
+BEGIN
+    IF (is_updated) THEN
+        UPDATE HealthDeclaration SET temp = declared_temperature
+            WHERE eid = employee_id AND date = declared_date;
+    ELSE
+        INSERT INTO HealthDeclaration (date, temp, eid)
+        VALUES (declared_date, declared_temperature, employee_id);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 -- contact_tracing
 
