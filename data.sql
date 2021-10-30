@@ -257,6 +257,25 @@ FOR EACH ROW EXECUTE FUNCTION check_if_booker_left();
 -- person booking is a Booker [Done by Yijie]
 -- booker has no fever [Done by Yijie]
 
+CREATE OR REPLACE FUNCTION check_time_clash_before_book() RETURNS TRIGGER AS $$
+DECLARE
+BEGIN
+    IF EXISTS(SELECT 1
+            FROM Books B
+            WHERE B.eid = NEW.eid
+            AND B.time = NEW.time
+            AND B.date = NEW.date)  
+            THEN RETURN NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS check_time_clash_for_books ON Joins;
+CREATE TRIGGER check_time_clash_for_books
+BEFORE INSERT OR UPDATE ON Books
+FOR EACH ROW EXECUTE FUNCTION check_time_clash_before_book();
+
 DROP TRIGGER IF EXISTS employee_booking_not_resigned ON Books;
 CREATE TRIGGER employee_booking_not_resigned
 BEFORE INSERT OR UPDATE ON Books
