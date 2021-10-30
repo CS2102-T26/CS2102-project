@@ -218,11 +218,8 @@ CREATE TRIGGER check_leave_not_approved_session
 BEFORE DELETE ON Joins
 FOR EACH ROW EXECUTE FUNCTION check_if_leave_not_in_approves();
 
-<<<<<<< HEAD
 -- Funtion to check if person who just left the meeting is a booker
--- if is booker, just delete from books
-=======
->>>>>>> caf558a2724c695c0812832c4eb619012ec29752
+-- if is booker, just delete from book
 CREATE OR REPLACE FUNCTION check_if_booker_left() RETURNS TRIGGER AS $$
 DECLARE
     -- check if for eid of tuple being deleted from joins, is booker for meeting
