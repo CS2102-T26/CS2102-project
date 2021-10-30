@@ -15,5 +15,5 @@ except  select a.time, a.date, a.floor, a.room from approves a join locatedin l 
 select b.time,b.date, b.floor, b.room from books b join locatedin l on b.floor = l.floor and b.room = l.room
 except  select a.time, a.date, a.floor, a.room from approves a join locatedin l on a.floor = l.floor and a.room = l.room;
 
--- EXPECTED FAIL
+-- EXPECTED FAIL (input date after all meetings date)
  select * from view_manager_report('2022-10-23', 291);
