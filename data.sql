@@ -125,6 +125,8 @@ CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
 DECLARE
     room_max_capacity INTEGER := (SELECT U.new_cap FROM Updates U
                                 WHERE U.date <= NEW.date
+                                AND U.floor = NEW.floor
+                                AND U.room = NEW.room
                                 ORDER BY U.date DESC
                                 LIMIT 1);
 
