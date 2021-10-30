@@ -233,11 +233,6 @@ DECLARE
             AND j.time >= start_hour
             AND j.time < end_hour
             AND j.date = book_date);  
-<<<<<<< HEAD
-            
-=======
-
->>>>>>> upstream/main
     tempTime TIME := start_hour;
     currTime TIME := start_hour;
 BEGIN
