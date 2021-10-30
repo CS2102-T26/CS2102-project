@@ -39,7 +39,7 @@ CALL book_room(4, 5, '2022-10-24', '10:00:00', '13:00:00', 261);
 CALL join_meeting(4, 5, '2022-10-24', '10:00:00', '13:00:00', 11);
 CALL join_meeting(4, 5, '2022-10-24', '10:00:00', '13:00:00', 12);
 CALL join_meeting(4, 5, '2022-10-24', '10:00:00', '13:00:00', 13);
-CALL approve_meeting(4, 5, '2022-10-24', '10:00:00', '13:00:00', 294);
+CALL approve_meeting(4, 5, '2022-10-24', '10:00:00', '13:00:00', 299);
 SELECT * FROM joins WHERE floor = 4 AND room = 5 AND date = '2022-10-24';
 
 -- EXPECTED FAIL meeting is approved

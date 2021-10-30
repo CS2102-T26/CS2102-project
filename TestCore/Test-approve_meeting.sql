@@ -4,7 +4,7 @@ insert into Sessions (time, date, floor, room) values ('12:00:00', '2022-10-24',
 insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-24', 4, 5);
 CALL book_room(4, 5, '2022-10-24', '10:00:00', '13:00:00', 261); 
 
--- EXPECTED PASS - meeting does not exist
+-- EXPECTED FAIL - meeting does not exist
 CALL approve_meeting(4, 5, '2022-10-24', '08:00:00', '09:00:00', 294);
 
 -- EXPECTED FAIL - manager not qualified to approve
