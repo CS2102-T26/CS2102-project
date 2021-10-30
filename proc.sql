@@ -233,7 +233,6 @@ DECLARE
             AND j.time >= start_hour
             AND j.time < end_hour
             AND j.date = book_date);  
-
     tempTime TIME := start_hour;
     currTime TIME := start_hour;
 BEGIN
@@ -488,7 +487,14 @@ RETURNS TABLE(floor INTEGER, room INTEGER, date DATE, start_hour TIME, eid INTEG
     SELECT b.floor, b.room, b.date, b.time, input_eid 
     FROM Books b LEFT OUTER JOIN Approves a
     ON b.floor = a.floor AND b.room = a.room AND b.date = a.date AND b.time = a.time
-    WHERE b.date >= start_date AND a.floor IS NULL AND input_eid IN (SELECT m.eid 
-                                                                    FROM Managers m)
+    WHERE b.date >= start_date 
+    AND a.floor IS NULL --check if in books but not in approves 
+    AND input_eid IN (SELECT m.eid 
+                      FROM Managers m)
+    AND input_eid IN (SELECT w.eid
+                      FROM WorksIn w JOIN LocatedIn l
+                      ON w.did = l.did
+                      WHERE l.floor = b.floor
+                      AND l.room = b.room)                  
     ORDER BY b.date, b.time ASC
 $$ LANGUAGE sql;
