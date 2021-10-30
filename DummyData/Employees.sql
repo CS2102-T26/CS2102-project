@@ -298,3 +298,13 @@ insert into Employees (ename, email, resign_date, home_number, mobile_number, of
 insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gawen Smees', 'gsmees89@surveymonkey.com', null, '983-679-6020', '553-110-2357', '935-129-1050');
 insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Morrie Dalbey', 'mdalbey8a@noaa.gov', null, '529-916-7501', '103-866-8578', '647-362-6049');
 insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Grete Simonot', 'gsimonot8b@naver.com', null, '258-874-4435', '237-524-5339', '212-600-4086');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Berkeley Dainter', 'bdainter0@smh.com.au', null, '750-530-0183', '106-509-4789', '307-998-6747');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cullie Mylchreest', 'cmylchreest1@tmall.com', null, '352-840-9074', '897-689-6224', '177-847-4688');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gherardo Stannard', 'gstannard2@walmart.com', null, '739-639-0591', '772-506-4440', '682-569-3522');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Emilio Ebbetts', 'eebbetts3@amazon.co.uk', null, '940-426-5306', '411-711-5620', '822-124-1600');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Letti Divina', 'ldivina4@globo.com', null, '582-275-4674', '291-756-7929', '111-852-5753');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Billie Lankester', 'blankester5@examiner.com', null, '663-938-5233', '457-595-3519', '726-101-6861');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Westleigh Kennermann', 'wkennermann6@oracle.com', null, '464-825-9470', '180-450-5682', '626-219-4536');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Faustina Newell', 'fnewell7@dailymail.co.uk', null, '971-471-3651', '945-516-6920', '600-110-4195');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Leonhard Yearnsley', 'lyearnsley8@surveymonkey.com', null, '220-141-0689', '577-322-9489', '421-550-0384');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Griz Weddell', 'gweddell9@flavors.me', null, '862-291-1491', '148-147-0603', '525-590-6456');

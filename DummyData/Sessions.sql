@@ -71,6 +71,17 @@ insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-26',
 insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-26', 4, 2);
 insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-26', 4, 2);
 insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-26', 4, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 2, 2);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 2, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-28', 2, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 2, 3);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 2, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 4, 1);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-28', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 4, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-28', 4, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 4, 3);
 
 insert into sessions (time, date, floor, room) values ('16:00:00', current_date + 1, 2, 1);
 insert into sessions (time, date, floor, room) values ('16:00:00', current_date + 1, 2, 2);
