@@ -1,677 +1,1565 @@
--- Triggers
-
--- Trigger function removing any room booked with number of 
--- employees in meeting over the new capacity after update date
-CREATE OR REPLACE FUNCTION remove_bookings_over_capacity() RETURNS TRIGGER AS $$
-DECLARE 
-    -- select upper bound date; furthest update date for that room
-    upperBoundDate DATE := (SELECT MAX(U.date) 
-                            FROM Updates U
-                            WHERE U.floor = NEW.floor
-                            AND U.room = NEW.room);
-    -- Selects all booked meetings with capacity over new_capacity 
-    -- for room where capacity was changed
-    curs CURSOR FOR (SELECT B.time, B.date, B.floor, B.room, COUNT(J.eid)
-                    FROM Books B JOIN Joins J 
-                        ON B.time = J.time AND B.date = J.date
-                           AND B.floor = J.floor AND B.room = J.room
-                    WHERE B.floor = NEW.floor AND B.room = NEW.room 
-                    AND (
-                    -- new updated date is new max date; find all bookings after this date
-                    (NEW.date >= upperBoundDate AND B.date >= NEW.date)
-                     OR 
-                    -- new updated date is before curr max date; find all booking in between
-                    (NEW.date <= upperBoundDate AND B.date >= NEW.date AND B.date < upperBoundDate)
-                    )
-                    GROUP BY B.time, B.date, B.floor, B.room
-                    HAVING COUNT(J.eid) > NEW.new_cap);
-    r1 RECORD;
-BEGIN
-    OPEN curs;
-    LOOP
-        -- EXIT WHEN NO MORE ROWS
-        FETCH curs INTO r1;
-        EXIT WHEN NOT FOUND;
-        -- DELETE from Books 
-        DELETE FROM Books B1
-        WHERE B1.time = r1.time 
-        AND B1.date = r1.date
-        AND  B1.floor = r1.floor
-        AND B1.room = r1.room;
-    END LOOP;
-    CLOSE curs;
-    RETURN NULL; 
-END;
-$$ LANGUAGE plpgsql;
-
--- Trigger to remove all sessions not meeting requirements after new cap insert
-DROP TRIGGER IF EXISTS capacity_updated ON Updates;
-CREATE TRIGGER capacity_updated
-AFTER INSERT OR UPDATE ON Updates
-FOR EACH ROW EXECUTE FUNCTION remove_bookings_over_capacity();
-
-
--- Trigger on UPDATE of Employee resign_date
--- Remove All meetings joined, booked or approved after employees resign date
-CREATE OR REPLACE FUNCTION remove_from_future_records() RETURNS TRIGGER AS $$
-BEGIN
-    -- Remove from Joins if date is after or on resigned_date
-    DELETE FROM Joins J 
-    WHERE J.eid = NEW.eid
-    AND J.date >= NEW.resign_date;
-    -- DELETE from Books; If inside will be deleted
-    DELETE FROM Books B 
-    WHERE B.eid = NEW.eid
-    AND B.date >= NEW.resign_date;
-    -- DELETE from Approves; If inside will be deleted
-    DELETE FROM Approves A 
-    WHERE A.eid = NEW.eid
-    AND A.date >= NEW.resign_date;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS employee_resigned ON Employees;
-CREATE TRIGGER employee_resigned
-AFTER UPDATE ON Employees
-FOR EACH ROW EXECUTE FUNCTION remove_from_future_records();
-
--- Trigger Function for checking if employee attempting to join / book / approves is still
--- working for the company
-CREATE OR REPLACE FUNCTION check_if_resigned() RETURNS TRIGGER AS $$
-DECLARE
-    e_left_date DATE;
-BEGIN
-    -- get date of employee joining, booking or adding
-    SELECT resign_date INTO e_left_date FROM Employees WHERE eid = NEW.eid;
-    -- Return null if no longer working there; resigned_date < date
-    IF e_left_date IS NOT NULL AND NEW.date > e_left_date THEN RETURN NULL;
-    END IF;
-    -- join / book / approve
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Trigger(s) for joining meeting;
--- check that 
--- employee is still working for company [DONE]
--- session has been booked [DONE]
--- session has not past [DONE in check constraint]
--- session has not been approved [DONE]
--- not over capacity [BORY] [DONE]
-
-CREATE OR REPLACE FUNCTION check_time_clash_before_join() RETURNS TRIGGER AS $$
-DECLARE
-BEGIN
-    IF EXISTS(SELECT 1
-            FROM joins j
-            WHERE j.eid = NEW.eid
-            AND j.time = NEW.time
-            AND j.date = NEW.date)  
-            THEN RETURN NULL;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS check_time_clash_for_join ON Joins;
-CREATE TRIGGER check_time_clash_for_join
-BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_time_clash_before_join();
-
--- ASSUMING Updates table has been updated to have multiple entries
-CREATE OR REPLACE FUNCTION check_capacity_before_join() RETURNS TRIGGER AS $$
-DECLARE
-    room_max_capacity INTEGER := (SELECT U.new_cap FROM Updates U
-                                WHERE U.date <= NEW.date
-                                AND U.floor = NEW.floor
-                                AND U.room = NEW.room
-                                ORDER BY U.date DESC
-                                LIMIT 1);
-
-    current_capacity INTEGER := (SELECT COUNT(*) FROM Joins J 
-                                WHERE NEW.time = J.time
-                                AND NEW.date = J.date
-                                AND NEW.floor = J.floor
-                                AND NEW.room = J.room);
-BEGIN
-    IF current_capacity < room_max_capacity THEN RETURN NEW;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS check_room_capacity_for_join ON Joins;
-CREATE TRIGGER check_room_capacity_for_join
-BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_capacity_before_join();
-
-
-CREATE OR REPLACE FUNCTION check_if_join_not_in_approves() RETURNS TRIGGER AS $$
-DECLARE
-    is_not_in boolean := NOT EXISTS (SELECT 1
-                        FROM Approves a
-                        WHERE NEW.time = a.time AND NEW.date = a.date
-                        AND NEW.floor = a.floor AND NEW.room = a.room
-                        );
-BEGIN
-    IF (is_not_in = TRUE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
---check if session is not approved before joining
-DROP TRIGGER IF EXISTS check_join_not_approved_session ON Joins;
-CREATE TRIGGER check_join_not_approved_session
-BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_join_not_in_approves();
-
-
-CREATE OR REPLACE FUNCTION check_if_in_books() RETURNS TRIGGER AS $$
-DECLARE
-    is_in boolean := EXISTS (SELECT 1
-                        FROM Books b
-                        WHERE NEW.time = b.time AND NEW.date = b.date
-                        AND NEW.floor = b.floor AND NEW.room = b.room
-                        );
-BEGIN
-    IF (is_in = TRUE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
---check if session is booked before joining
-DROP TRIGGER IF EXISTS check_join_booked_session ON Joins;
-CREATE TRIGGER check_join_booked_session
-BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
-
-
-DROP TRIGGER IF EXISTS employee_joining_not_resigned ON Joins;
-CREATE TRIGGER employee_joining_not_resigned
-BEFORE INSERT OR UPDATE ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
-
--- Trigger(s) for leaving meeting; 
--- check that 
--- session has not been approved [Le Zong] [DONE]
-
-CREATE OR REPLACE FUNCTION check_if_leave_not_in_approves() RETURNS TRIGGER AS $$
-DECLARE
-    is_not_in boolean := NOT EXISTS (SELECT 1
-                        FROM Approves a
-                        WHERE OLD.time = a.time AND OLD.date = a.date
-                        AND OLD.floor = a.floor AND OLD.room = a.room
-                        );
-BEGIN
-    IF (is_not_in = TRUE) THEN RETURN OLD;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
--- check that session employee is leaving has not been approved. (if approved, no more changes to ppl inside)
-DROP TRIGGER IF EXISTS check_leave_not_approved_session ON Joins;
-CREATE TRIGGER check_leave_not_approved_session
-BEFORE DELETE ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_leave_not_in_approves();
-
-CREATE OR REPLACE FUNCTION check_if_booker_left() RETURNS TRIGGER AS $$
-DECLARE
-    -- check if for eid of tuple being deleted from joins, is booker for meeting
-    session_booker_id INT := (SELECT B.eid
-                              FROM Books B 
-                              WHERE B.time = OLD.time
-                              AND B.date = OLD.date
-                              AND B.floor = OLD.floor
-                              AND B.room = OLD.room);
-BEGIN
-    IF (session_booker_id = OLD.eid) THEN 
-        DELETE FROM Books 
-        WHERE eid = OLD.eid
-        AND time = OLD.time
-        AND date = OLD.date
-        AND floor = OLD.floor
-        AND room = OLD.room;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
--- Trigger checked each time someone leaves a meeting
-DROP TRIGGER IF EXISTS booker_leave_meeting ON Joins;
-CREATE TRIGGER booker_leave_meeting 
-AFTER DELETE ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_if_booker_left();
-
-
--- Trigger(s) for booking meeting;
--- Check that 
--- booker is still working for company [DONE]
--- person booking is a Booker [Done by Yijie]
--- booker has no fever [Done by Yijie]
-
-DROP TRIGGER IF EXISTS employee_booking_not_resigned ON Books;
-CREATE TRIGGER employee_booking_not_resigned
-BEFORE INSERT OR UPDATE ON Books
-FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
-
--- Trigger(s) for unbooking meeting; BEFORE DELETE 
--- Check that 
--- employee is still working for company [DONE]: once employee resigned, all meetings
-    -- booked by him after resign date are unbooked automatically; trigger on top
--- if approved; remove approval [Yijie] [DONE]
--- if employees joined; removed joined employees [Yijie] [DONE]
--- employee is still working for company [DONE]
-
-CREATE OR REPLACE FUNCTION delete_from_approves() RETURNS TRIGGER AS $$
-BEGIN
-    DELETE FROM Approves a 
-    WHERE a.time = OLD.time 
-    AND a.date = OLD.date
-    AND a.floor = OLD.floor
-    AND a.room = OLD.room;
-    RETURN OLD;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS delete_approved_session ON Books;
-CREATE TRIGGER delete_approved_session
-AFTER DELETE ON Books
-FOR EACH ROW EXECUTE FUNCTION delete_from_approves();
-
--- need to check
-CREATE OR REPLACE FUNCTION delete_from_joins() RETURNS TRIGGER AS $$
-BEGIN 
-    DELETE FROM Joins J
-    WHERE J.time = OLD.time 
-    AND J.date = OLD.date
-    AND J.floor = OLD.floor
-    AND J.room = OLD.room;
-    RETURN OLD;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS delete_joined_session ON Books;
-CREATE TRIGGER delete_joined_session
-AFTER DELETE ON Books
-FOR EACH ROW EXECUTE FUNCTION delete_from_joins();
-
--- Trigger(s) for approving meetings
--- Check that 
--- person approving is a manager [Le Zong] [already in foreign key]
--- person is still working for company [DONE]
--- session has not been approved [Le Zong] [already in foreign key]
--- session has been booked [Le Zong] [DONE]
--- person approving is in the same department as the meeting room [Le Zong] [DONE]
-
-
---check if session being approved is booked
-DROP TRIGGER IF EXISTS check_approves_booked_session ON Approves;
-CREATE TRIGGER check_approves_booked_session
-BEFORE INSERT ON Approves
-FOR EACH ROW EXECUTE FUNCTION check_if_in_books();
-
-
--- C21
--- Booking approval must be from manager of the dept
-CREATE OR REPLACE FUNCTION check_if_approver_same_did() RETURNS TRIGGER AS $$
-DECLARE
-    is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
-BEGIN
-    IF (is_mgr_of_dept = TRUE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
---check if approver is in the same department as the meeting room 
-DROP TRIGGER IF EXISTS check_approves_same_did ON Approves;
-CREATE TRIGGER check_approves_same_did
-BEFORE INSERT ON Approves 
-FOR EACH ROW EXECUTE FUNCTION check_if_approver_same_did();
-
-
-DROP TRIGGER IF EXISTS employee_approving_not_resigned ON Approves;
-CREATE TRIGGER employee_approving_not_resigned
-BEFORE INSERT OR UPDATE ON Approves
-FOR EACH ROW EXECUTE FUNCTION check_if_resigned();
-
-
-
-
-/**
- * NON-PROCEDURE RELATED CONSTRAINTS
- */
-
-
--- Refactor internal checks for reuse
--- STORED FUNCTION TO CHECK IF JUNIOR
-CREATE OR REPLACE FUNCTION is_junior(checked_eid INTEGER) 
-RETURNS BOOLEAN AS $$
-DECLARE
-    is_in BOOLEAN;
-BEGIN
-    is_in := EXISTS (SELECT 1 FROM Juniors J WHERE checked_eid = J.eid);
-    RETURN is_in;
-END;
-$$ LANGUAGE plpgsql;
-
--- STORED FUNCTION TO CHECK IF SENIOR
-CREATE OR REPLACE FUNCTION is_senior(checked_eid INTEGER)
-RETURNS BOOLEAN AS $$
-DECLARE 
-    is_in BOOLEAN;
-BEGIN
-    is_in := EXISTS (SELECT 1 FROM Seniors S WHERE checked_eid = S.eid);
-    RETURN is_in;
-END;
-$$ LANGUAGE plpgsql;
-
--- STORED FUNCTION TO CHECK IF MANAGER
-CREATE OR REPLACE FUNCTION is_manager(checked_eid INTEGER)
-RETURNS BOOLEAN AS $$
-DECLARE
-    is_in BOOLEAN;
-BEGIN
-    is_in := EXISTS (SELECT 1 FROM Managers M WHERE checked_eid = M.eid);
-    RETURN is_in;
-END;
-$$ LANGUAGE plpgsql;
-
--- STORED FUNCTION TO CHECK IF BOOKER
-CREATE OR REPLACE FUNCTION is_booker(checked_eid INTEGER)
-RETURNS BOOLEAN AS $$
-DECLARE
-    is_in BOOLEAN;
-BEGIN
-    is_in := EXISTS (SELECT 1 FROM Bookers B WHERE checked_eid = B.eid);
-    RETURN is_in;
-END;
-$$ LANGUAGE plpgsql;
-
--- STORED FUNCTION TO CHECK IF MANAGER OF THAT DEPT
-CREATE OR REPLACE FUNCTION is_manager_of_dept(checked_eid INTEGER, checked_floor INTEGER, checked_room INTEGER)
-RETURNS BOOLEAN AS $$
-DECLARE 
-    is_mgr_of_dept BOOLEAN;
-BEGIN
-    is_mgr_of_dept := EXISTS (SELECT 1
-                        FROM LocatedIn l
-                        JOIN WorksIn w
-                        ON l.floor = checked_floor
-                        AND l.room = checked_room
-                        AND l.did = w.did
-                        WHERE checked_eid = w.eid);
-    RETURN is_mgr_of_dept;
-END;
-$$ LANGUAGE plpgsql;
-
-
--- C12
--- insert into seniors is not junior or manager
-CREATE OR REPLACE FUNCTION check_if_jr_or_mgr() RETURNS TRIGGER AS $$
-DECLARE
-    is_in_jr BOOLEAN := is_junior(NEW.eid);
-    is_in_mgr BOOLEAN := is_manager(NEW.eid);
-BEGIN
-    IF (is_in_jr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS senior_employee_not_jr_or_mgr ON Seniors;
-CREATE TRIGGER senior_employee_not_jr_or_mgr
-BEFORE INSERT ON Seniors
-FOR EACH ROW EXECUTE FUNCTION check_if_jr_or_mgr();
-
-
--- C12
--- insert into juniors is not senior or manager
-CREATE OR REPLACE FUNCTION check_if_sr_or_mgr() RETURNS TRIGGER AS $$
-DECLARE
-    is_in_sr BOOLEAN := is_senior(NEW.eid);
-    is_in_mgr BOOLEAN := is_manager(NEW.eid);
-BEGIN
-    IF (is_in_sr = FALSE AND is_in_mgr = FALSE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS junior_employee_not_booker ON Juniors;
-CREATE TRIGGER junior_employee_not_booker
-BEFORE INSERT ON Juniors
-FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_mgr();
-
-
--- C12
--- insert into manager is not senior or junior
-CREATE OR REPLACE FUNCTION check_if_sr_or_jr() RETURNS TRIGGER AS $$
-DECLARE
-    is_in_jr BOOLEAN := is_junior(NEW.eid);
-    is_in_sr BOOLEAN := is_senior(NEW.eid);
-BEGIN
-    IF (is_in_jr = FALSE AND is_in_sr = FALSE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS manager_not_sr_or_jr ON Managers;
-CREATE TRIGGER manager_not_sr_or_jr
-BEFORE INSERT ON Managers
-FOR EACH ROW EXECUTE FUNCTION check_if_sr_or_jr();
-
-
--- C13, C14
--- Only allow inserts for seniors or managers for Books table
-CREATE OR REPLACE FUNCTION check_if_can_book() RETURNS TRIGGER AS $$
-DECLARE
-    is_in_booker BOOLEAN := is_booker(NEW.eid);
-BEGIN
-    IF (is_in_booker = TRUE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS valid_room_booker ON Books;
-CREATE TRIGGER valid_room_booker
-BEFORE INSERT ON Books
-FOR EACH ROW EXECUTE FUNCTION check_if_can_book();
--- insert into Sessions values ('11:00:00', '2022-10-17', 5, 5);
--- insert into Books (eid, time, date, floor, room) values (293, '11:00:00', '2022-10-16', 1, 1);
-
-
-
--- C24
--- updates trigger to check if is manager and dept of manager+room for updating capacity
-CREATE OR REPLACE FUNCTION check_if_mgr_of_dept() RETURNS TRIGGER AS $$
-DECLARE
-    is_in_mgr BOOLEAN := is_manager(NEW.eid);
-    is_mgr_of_dept BOOLEAN := is_manager_of_dept(NEW.eid, NEW.floor, NEW.room);
-BEGIN
-    IF (is_in_mgr = TRUE AND is_mgr_of_dept = TRUE) THEN RETURN NEW;
-    ELSE RETURN NULL;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
--- C24
-DROP TRIGGER IF EXISTS check_valid_employee_update ON Updates;
-CREATE TRIGGER check_valid_employee_update
-BEFORE INSERT OR UPDATE ON Updates
-FOR EACH ROW EXECUTE FUNCTION check_if_mgr_of_dept();
-
--- Due to the pandemic, we have to be vigilant. If an employee is recorded to have a fever at a given day D, a few things
--- must happen:
--- 1. The employee is removed from all future meeting room booking, approved or not. [DONE]
--- If the employee is the one booking the room, the booking is cancelled, approved or not. [DONE]
--- This employee cannot book a room until they are no longer having fever. [DONE]
--- 2. All employees in the same approved meeting room from the past 3 (i.e., from day D-3 to day D) days are contacted. [NOT SURE WHAT THEY MEAN BY CONTACTED]
--- These employees are removed from future meeting in the next 7 days (i.e., from day D to day D+7). [DONE, BUT ONLY FOR JOINS. PROBABLY NEED SOME ON DELETE CASCADE FOR BOOKS]
--- We say that these employees were in close contact with the employee having a fever.
--- These restrictions are based on the assumptions that once approved, the meeting will occur with all participants
--- attending.
-
-CREATE OR REPLACE FUNCTION remove_on_fever() RETURNS TRIGGER AS $$
-DECLARE
-    has_fever BOOLEAN := (NEW.temp > 37.5);
-    curs CURSOR FOR (SELECT b.time, b.date, b.floor, b.room FROM
-            Books b WHERE NEW.eid = b.eid 
-            AND b.date > NEW.date);
-    r1 RECORD;
-BEGIN
-    IF (has_fever) THEN
-
-        -- meetings employee joins
-        DELETE FROM Joins j 
-        WHERE j.eid = NEW.eid
-        AND j.date >= NEW.date;
-
-        -- remove all employees from meetings booked by this employee
-        -- intentionally done before deletion of booking
-        OPEN curs;
-        LOOP
-            FETCH curs INTO r1;
-            EXIT WHEN NOT FOUND;
-            DELETE FROM Joins j1
-            WHERE j1.time = r1.time 
-            AND j1.date = r1.date
-            AND  j1.floor = r1.floor
-            AND j1.room = r1.room;
-        END LOOP;
-        CLOSE curs;
-
-        -- meetings employee has booked
-        DELETE FROM Books b 
-        WHERE b.eid = NEW.eid
-        AND b.date >= NEW.date;
-
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
-CREATE TRIGGER remove_on_fever
-AFTER INSERT OR UPDATE ON HealthDeclaration
-FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
-
-CREATE OR REPLACE FUNCTION check_for_fever() RETURNS TRIGGER AS $$
-DECLARE
-    has_fever BOOLEAN := ((SELECT temp
-                        FROM HealthDeclaration WHERE eid = NEW.eid
-                        ORDER BY date DESC
-                        LIMIT 1) > 37.5);
-BEGIN
-    IF (has_fever) THEN RETURN NULL;
-    ELSE RETURN NEW;
-    END IF;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS check_for_fever ON Books;
-CREATE TRIGGER check_for_fever
-BEFORE INSERT ON Books
-FOR EACH ROW EXECUTE FUNCTION check_for_fever();
-
--- C19
--- Prevent any fever employees from joining
-DROP TRIGGER IF EXISTS check_for_fever_join ON Joins;
-CREATE TRIGGER check_for_fever_join
-BEFORE INSERT ON Joins
-FOR EACH ROW EXECUTE FUNCTION check_for_fever();
-
-CREATE OR REPLACE FUNCTION remove_contacted_employees_on_fever() RETURNS TRIGGER AS $$
-DECLARE
-    has_fever BOOLEAN := (NEW.temp > 37.5);
-    -- getting all employees that joined/booked rooms that this employee joined/booked in the past 3 days
-    curs CURSOR FOR (SELECT j1.eid FROM
-            Joins j1 JOIN Joins j2
-            ON j2.eid = NEW.eid
-            AND j2.date < NEW.date
-            AND j2.date >= NEW.date - 3
-            AND j2.time = j1.time
-            AND j2.date = j1.date
-            AND j2.floor = j1.floor
-            AND j2.room = j1.room
-            JOIN Approves a
-            ON j2.date = a.date
-            AND j2.time = a.time
-            AND j2.floor = a.floor
-            AND j2.room = a.room
-            UNION
-            SELECT b.eid FROM
-            Books b JOIN Joins j
-            ON j.eid = NEW.eid
-            AND j.date < NEW.date
-            AND j.date >= NEW.date - 3
-            AND j.time = b.time
-            AND j.date = b.date
-            AND j.floor = b.floor
-            AND j.room = b.room
-            JOIN Approves a
-            ON j.date = a.date
-            AND j.time = a.time
-            AND j.floor = a.floor
-            AND j.room = a.room
-            UNION
-            SELECT j.eid FROM
-            Joins j JOIN Books b
-            ON b.eid = NEW.eid
-            AND b.date < NEW.date
-            AND b.date >= NEW.date - 3
-            AND j.time = b.time
-            AND j.date = b.date
-            AND j.floor = b.floor
-            AND j.room = b.room
-            JOIN Approves a
-            ON j.date = a.date
-            AND j.time = a.time
-            AND j.floor = a.floor
-            AND j.room = a.room);
-    r1 RECORD;
-    
-BEGIN
-    IF (has_fever) THEN
-
-        -- remove all employees that attended meetings booked by this employee in the past 3 days
-        -- from meetings in the next 7 days (Both joining and bookings)
-        OPEN curs;
-        LOOP
-            FETCH curs INTO r1;
-            EXIT WHEN NOT FOUND;
-            DELETE FROM Joins j1
-            WHERE r1.eid = j1.eid
-            AND j1.date >= NEW.date
-            AND j1.date <= NEW.date + 7;
-        END LOOP;
-        LOOP
-            FETCH curs INTO r1;
-            EXIT WHEN NOT FOUND;
-            DELETE FROM Books b1
-            WHERE r1.eid = b1.eid
-            AND b1.date >= NEW.date
-            AND b1.date <= NEW.date + 7;
-        END LOOP;
-        CLOSE curs;
-
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS remove_on_fever ON HealthDeclaration;
-CREATE TRIGGER remove_on_fever
-AFTER INSERT OR UPDATE ON HealthDeclaration
-FOR EACH ROW EXECUTE FUNCTION remove_on_fever();
-
-DROP TRIGGER IF EXISTS remove_contacted_employees_on_fever ON HealthDeclaration;
-CREATE TRIGGER remove_contacted_employees_on_fever
-AFTER INSERT OR UPDATE ON HealthDeclaration
-FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
+insert into Departments (did, dname) values (1, 'Engineering');
+insert into Departments (did, dname) values (2, 'Business Development');
+insert into Departments (did, dname) values (3, 'Human Resources');
+insert into Departments (did, dname) values (4, 'Research and Development');
+insert into Departments (did, dname) values (5, 'Accounting');
+insert into Departments (did, dname) values (6, 'Marketing');
+insert into Departments (did, dname) values (7, 'Sales');
+insert into Departments (did, dname) values (8, 'Support');
+insert into Departments (did, dname) values (9, 'Product Management');
+insert into Departments (did, dname) values (10, 'Legal');
+insert into Departments (did, dname) values (11, 'Services');
+insert into Departments (did, dname) values (12, 'Training');
+
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Dionysus Blodg', 'dblodg0@histats.com', null, '443-718-7706', '985-680-1538', '876-963-1027');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sisile Smallacombe', 'ssmallacombe1@cmu.edu', null, '565-140-0890', '303-906-3633', '754-888-7971');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Valma Brodeur', 'vbrodeur2@vistaprint.com', null, '177-521-0953', '226-272-2744', '654-849-8002');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jesus Sprull', 'jsprull3@prnewswire.com', null, '118-791-4432', '653-516-2398', '308-144-0503');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Donelle Zecchii', 'dzecchii4@bloglovin.com', null, '707-199-2943', '680-367-6199', '352-284-2853');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Nickolaus Hulle', 'nhulle5@github.com', null, '228-666-3756', '641-700-8098', '447-416-2807');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Harriott Estcot', 'hestcot6@over-blog.com', '2021-04-08', '313-255-9116', '228-564-1342', '902-835-4942');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Chaddy Willock', 'cwillock7@ted.com', null, '706-748-9493', '801-304-8162', '187-225-9219');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kizzie Lifton', 'klifton8@linkedin.com', null, '132-452-0086', '389-446-8527', '301-358-4231');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hector Margaret', 'hmargaret9@rambler.ru', '2020-09-04', '650-882-3473', '748-910-4723', '848-118-0872');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Felizio Cosham', 'fcoshama@yahoo.com', null, '904-155-2969', '428-707-0460', '881-215-3112');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Binni Cohalan', 'bcohalanb@theguardian.com', null, '997-864-3976', '538-508-9587', '219-874-2203');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Babb Bleibaum', 'bbleibaumc@rambler.ru', null, '243-855-2982', '690-233-2253', '992-534-1787');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Virgil Rigler', 'vriglerd@slate.com', null, '256-993-5207', '957-265-4057', '847-459-7184');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Brnaby Yuryshev', 'byurysheve@netvibes.com', null, '433-580-8319', '423-675-5891', '579-760-2043');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sheela Edgcombe', 'sedgcombef@opera.com', null, '352-993-9464', '364-770-2361', '424-640-1560');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Alano Leighfield', 'aleighfieldg@scribd.com', null, '910-209-2758', '371-762-7252', '403-416-8914');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Juliann Allibone', 'jalliboneh@senate.gov', null, '775-823-5800', '556-326-7943', '160-584-4969');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Peri Bovey', 'pboveyi@netscape.com', null, '582-795-2182', '438-932-1147', '370-272-0161');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Briant Melonby', 'bmelonbyj@boston.com', null, '475-667-6553', '793-479-1475', '170-178-3016');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Layney Parrington', 'lparringtonk@skyrock.com', null, '722-511-2368', '531-718-3333', '482-719-4182');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Florry Leamy', 'fleamyl@blogtalkradio.com', null, '807-333-1690', '589-106-0255', '120-899-2720');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jannelle Gapper', 'jgapperm@4shared.com', null, '226-971-6322', '235-179-6099', '447-485-2809');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Andree Barltrop', 'abarltropn@biglobe.ne.jp', '2021-02-27', '782-237-9511', '463-855-8405', '411-862-7767');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Linda Meechan', 'lmeechano@ask.com', null, '393-883-5463', '816-813-4533', '301-683-9038');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Mickey Pickton', 'mpicktonp@canalblog.com', null, '903-765-3509', '626-847-6992', '178-125-5590');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Pedro Navein', 'pnaveinq@wiley.com', null, '961-496-8321', '574-145-0571', '434-406-5463');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hadleigh Goodinson', 'hgoodinsonr@google.nl', null, '574-497-1339', '218-365-6777', '161-771-3315');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Timmie Rapsey', 'trapseys@odnoklassniki.ru', null, '201-180-6305', '142-305-9985', '282-947-5317');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Else Younie', 'eyouniet@addthis.com', '2020-07-02', '973-329-9571', '810-188-0380', '122-419-4545');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Stace Bangle', 'sbangleu@opensource.org', null, '617-564-9738', '778-803-9754', '230-798-7748');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gennifer Tal', 'gtalv@google.fr', null, '809-984-4078', '903-369-7385', '307-846-5633');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Dolores Cockburn', 'dcockburnw@myspace.com', null, '723-747-2294', '111-666-5830', '726-990-4437');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Stormi Bouskill', 'sbouskillx@bloglovin.com', null, '907-186-8590', '389-352-1357', '354-708-7275');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('George McGorley', 'gmcgorleyy@photobucket.com', null, '535-521-4025', '161-536-4946', '436-427-9521');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ruthy Tumility', 'rtumilityz@surveymonkey.com', null, '411-281-8541', '796-655-5902', '201-608-1987');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Benyamin Meenan', 'bmeenan10@mozilla.com', null, '838-322-3564', '128-771-0816', '388-727-8136');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Nissie Hadgkiss', 'nhadgkiss11@unesco.org', null, '371-488-9674', '223-854-9472', '722-143-2922');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Caresa Monkleigh', 'cmonkleigh12@canalblog.com', null, '854-906-7101', '933-372-6506', '176-938-0588');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Norrie Cratere', 'ncratere13@delicious.com', null, '543-908-0697', '233-220-3050', '141-210-5271');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tasia Frisel', 'tfrisel14@cnbc.com', null, '896-772-1926', '135-983-9426', '344-891-6785');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Raf Barczewski', 'rbarczewski15@creativecommons.org', null, '220-339-9184', '995-722-3772', '830-930-7700');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bartlet Ioselev', 'bioselev16@newyorker.com', null, '283-883-7015', '165-180-9327', '905-162-8280');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Brendis Jenman', 'bjenman17@feedburner.com', null, '919-714-8973', '296-557-9446', '457-953-0039');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Itch Cockhill', 'icockhill18@vkontakte.ru', '2021-05-30', '213-483-4233', '627-616-8450', '195-329-8082');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jerad Beadel', 'jbeadel19@livejournal.com', null, '104-317-9563', '594-715-6221', '567-853-2769');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Philip Moreside', 'pmoreside1a@netlog.com', '2020-03-08', '511-714-5514', '610-369-4045', '741-900-4128');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Odele Richardt', 'orichardt1b@apache.org', null, '368-873-0564', '686-442-1735', '873-794-3380');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Wilek Greathead', 'wgreathead1c@digg.com', null, '488-850-3310', '626-825-2924', '308-208-0170');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Raffarty Lanon', 'rlanon1d@moonfruit.com', null, '672-641-3976', '716-507-2812', '921-620-4049');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Di Muncer', 'dmuncer1e@ask.com', null, '995-217-7353', '743-413-9636', '511-386-8543');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ronnie Lawley', 'rlawley1f@infoseek.co.jp', null, '974-928-4937', '984-634-2039', '585-178-2745');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lizzy Bonallick', 'lbonallick1g@cpanel.net', '2021-06-24', '711-729-9991', '205-586-4939', '564-615-5117');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Alwyn Sissel', 'asissel1h@angelfire.com', null, '511-179-2304', '705-939-1351', '393-893-3804');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kit Thairs', 'kthairs1i@earthlink.net', null, '259-621-8307', '182-485-3759', '869-537-9622');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Andras Valenti', 'avalenti1j@whitehouse.gov', null, '409-731-2551', '444-604-0587', '256-719-5639');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Nissa Logan', 'nlogan1k@phpbb.com', null, '860-625-7510', '952-484-3401', '921-314-0023');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hallie Gommey', 'hgommey1l@ca.gov', null, '514-107-4390', '513-520-4029', '961-542-1615');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ray Okenfold', 'rokenfold1m@aol.com', null, '485-781-1972', '860-998-1531', '279-189-7354');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lory Bakey', 'lbakey1n@abc.net.au', null, '848-642-9391', '923-557-8700', '637-879-8349');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fiorenze Phythean', 'fphythean1o@businessinsider.com', null, '817-663-0123', '205-362-6746', '856-227-3056');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Franz Rogerson', 'frogerson1p@xinhuanet.com', null, '985-841-5290', '997-763-8286', '600-305-3859');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Maximilien O''Suaird', 'mosuaird1q@sogou.com', null, '746-829-6569', '402-216-6902', '928-749-4683');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Trueman Stanistreet', 'tstanistreet1r@reuters.com', null, '767-473-8286', '383-345-6554', '980-354-9970');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Stace Catford', 'scatford1s@livejournal.com', null, '687-537-7526', '926-522-4352', '516-938-0304');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Roxine Le Pine', 'rle1t@si.edu', null, '400-369-1766', '950-311-1118', '572-963-4290');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Deane Chestnutt', 'dchestnutt1u@gnu.org', null, '198-674-9755', '179-111-2592', '874-997-8631');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Temple Poytheras', 'tpoytheras1v@examiner.com', null, '768-371-7155', '658-927-1999', '409-760-2735');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Quincy Climie', 'qclimie1w@freewebs.com', null, '523-586-3197', '587-249-3869', '567-921-6624');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Michaeline Brunger', 'mbrunger1x@dot.gov', null, '362-163-2200', '446-483-7239', '117-347-5275');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sanford Yewman', 'syewman1y@intel.com', null, '635-310-5027', '613-271-9382', '594-357-5066');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Beniamino Stolting', 'bstolting1z@csmonitor.com', null, '117-274-7915', '578-488-8871', '774-358-2119');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Robina Allerton', 'rallerton20@arstechnica.com', null, '824-814-5154', '169-873-1862', '596-543-6586');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Moe Woodburn', 'mwoodburn21@usda.gov', null, '734-439-3047', '234-688-5786', '894-442-8711');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Morly Adamovitch', 'madamovitch22@ameblo.jp', null, '972-880-5015', '778-486-5558', '268-803-8612');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Niccolo Darth', 'ndarth23@ameblo.jp', null, '132-412-1543', '270-645-4003', '891-179-3579');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Phillis Vinter', 'pvinter24@shinystat.com', null, '956-777-2484', '152-579-9085', '767-640-5621');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Alis Treske', 'atreske25@behance.net', null, '610-332-9581', '505-329-9330', '709-470-0526');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Pavlov Kelmere', 'pkelmere26@yahoo.com', null, '974-202-8342', '344-223-1610', '859-228-9782');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Modesty Hains', 'mhains27@youtu.be', null, '160-855-4488', '894-291-1783', '822-672-7519');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gorden Dillaway', 'gdillaway28@barnesandnoble.com', null, '305-780-0917', '321-410-5070', '652-828-7594');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Merv Gobeaux', 'mgobeaux29@nba.com', null, '117-803-9925', '941-197-7781', '937-352-2549');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Adler Corriea', 'acorriea2a@discovery.com', null, '853-705-3191', '269-115-3074', '843-150-8269');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ros Fahrenbach', 'rfahrenbach2b@domainmarket.com', null, '500-351-6289', '635-641-0133', '597-533-7869');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jacquelyn Bullard', 'jbullard2c@hugedomains.com', null, '588-157-6851', '491-366-8616', '514-356-2859');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Susann Mailey', 'smailey2d@nhs.uk', null, '194-507-0547', '127-352-5761', '457-607-5043');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Janela Malzard', 'jmalzard2e@adobe.com', null, '632-272-3287', '479-610-1562', '928-466-2627');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bryanty Harsum', 'bharsum2f@nationalgeographic.com', null, '122-921-2635', '187-761-7863', '162-151-1788');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kincaid Gover', 'kgover2g@java.com', '2020-02-13', '230-859-5913', '152-838-2145', '693-201-8722');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tome O''Spellissey', 'tospellissey2h@accuweather.com', null, '640-664-7335', '583-117-1368', '592-221-3508');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Abie Burchatt', 'aburchatt2i@gravatar.com', '2021-07-22', '975-474-6012', '519-518-0304', '401-309-9355');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Birdie Martyns', 'bmartyns2j@dagondesign.com', null, '543-953-5275', '658-892-4730', '168-214-0275');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hazlett Clive', 'hclive2k@google.de', null, '319-943-6818', '634-247-0466', '875-585-7608');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Crista De Souza', 'cde2l@uiuc.edu', '2020-10-03', '273-646-5051', '422-491-5948', '748-101-9439');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Rachele Rosier', 'rrosier2m@bandcamp.com', null, '564-135-1196', '846-839-7685', '599-433-5827');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Irving Elmhurst', 'ielmhurst2n@omniture.com', null, '352-840-4232', '431-121-7724', '994-641-7016');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sanders Fishpond', 'sfishpond2o@nih.gov', null, '909-240-7414', '248-563-6148', '136-992-5258');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ricky Towersey', 'rtowersey2p@diigo.com', null, '169-147-6851', '469-237-0493', '124-434-4397');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Karalynn Phelip', 'kphelip2q@techcrunch.com', null, '942-734-3805', '745-384-6733', '246-643-8119');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Trixie Ithell', 'tithell2r@craigslist.org', null, '624-127-4748', '639-568-7258', '635-223-3016');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Phoebe Provost', 'pprovost2s@dyndns.org', null, '743-102-1591', '633-368-0314', '311-720-7174');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Claus Chatell', 'cchatell2t@ft.com', null, '692-766-4519', '854-970-4460', '314-856-7287');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Alexandre Starrs', 'astarrs2u@huffingtonpost.com', null, '954-466-5742', '363-765-8930', '978-415-9905');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Luther Kid', 'lkid2v@shareasale.com', null, '484-130-5845', '327-335-4497', '973-873-9012');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ganny Caldayrou', 'gcaldayrou2w@sun.com', null, '628-905-2554', '292-710-1022', '741-357-6986');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bobine Fellnee', 'bfellnee2x@cafepress.com', null, '218-971-0853', '562-876-2819', '684-240-5856');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tull Withers', 'twithers2y@reference.com', '2021-08-11', '136-636-7820', '250-700-3774', '609-801-9097');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Elvis Woodman', 'ewoodman2z@sohu.com', null, '613-717-2255', '115-595-4702', '176-635-5838');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Aile Jiracek', 'ajiracek30@1und1.de', '2019-12-10', '624-416-5253', '396-373-8843', '947-790-7015');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jacki Bobasch', 'jbobasch31@youtu.be', null, '516-248-5612', '709-157-2415', '164-713-9352');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tremain Stigell', 'tstigell32@photobucket.com', null, '810-556-4176', '196-120-2098', '447-278-2655');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Elvyn Kerner', 'ekerner33@auda.org.au', null, '823-382-7672', '299-857-3224', '202-342-6923');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Haydon Berford', 'hberford34@go.com', null, '135-193-5103', '389-636-1015', '980-122-4698');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hobey Cottrill', 'hcottrill35@macromedia.com', null, '367-427-4384', '620-899-7179', '722-207-2359');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Katina Abercrombie', 'kabercrombie36@washingtonpost.com', null, '260-650-2018', '889-919-5363', '913-629-9438');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Merralee Ruskin', 'mruskin37@odnoklassniki.ru', null, '713-233-6420', '413-653-2242', '274-949-3930');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Nissy Boarleyson', 'nboarleyson38@marriott.com', '2021-08-23', '388-209-3805', '686-612-6333', '535-464-5040');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fidela Benesevich', 'fbenesevich39@sohu.com', null, '539-430-8854', '106-571-4101', '722-846-2215');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jerry Stare', 'jstare3a@walmart.com', null, '730-221-5656', '458-628-2478', '483-301-5081');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Keven Sheepy', 'ksheepy3b@sun.com', null, '117-378-8007', '693-199-3924', '552-792-0176');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Alastair Dougan', 'adougan3c@fotki.com', null, '347-989-9952', '434-395-1138', '661-489-4854');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Iona Pogue', 'ipogue3d@mit.edu', null, '441-153-8325', '928-661-8361', '924-571-5910');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Willa Truluck', 'wtruluck3e@youtube.com', null, '426-823-5251', '371-728-0312', '559-252-2823');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cullie Ugoni', 'cugoni3f@bloglovin.com', null, '570-307-2291', '718-587-6765', '458-885-1830');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Roldan Hosten', 'rhosten3g@reddit.com', null, '304-137-8740', '564-367-7464', '171-284-2821');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gael Matyasik', 'gmatyasik3h@google.es', '2021-08-21', '394-905-2987', '169-494-0913', '614-847-7942');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Taber Schimpke', 'tschimpke3i@skype.com', null, '788-850-8352', '224-150-4422', '303-225-1118');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tiphany Labbey', 'tlabbey3j@google.co.jp', null, '411-994-0771', '243-131-2158', '332-500-8936');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Milo Heinle', 'mheinle3k@github.io', null, '342-706-8521', '438-679-8413', '630-326-2111');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tildy Antonucci', 'tantonucci3l@techcrunch.com', null, '419-800-1823', '625-491-6626', '888-138-4387');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Christie Rowen', 'crowen3m@shareasale.com', null, '904-202-4557', '528-723-7126', '525-589-6822');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Diandra Antal', 'dantal3n@gizmodo.com', null, '643-556-4883', '694-807-9963', '778-982-8499');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Rollo Karp', 'rkarp3o@storify.com', null, '399-917-1185', '124-361-4483', '263-474-2174');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cesare Vayne', 'cvayne3p@smugmug.com', null, '434-500-9273', '151-214-8717', '555-861-0151');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Irvine Chaytor', 'ichaytor3q@topsy.com', null, '711-368-1959', '740-659-6795', '615-674-1601');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Janis O''Dwyer', 'jodwyer3r@cpanel.net', null, '439-536-1671', '180-711-4210', '330-385-2878');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Normy Chambers', 'nchambers3s@mail.ru', null, '871-914-2154', '828-247-3622', '703-712-1268');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Dorice Mangam', 'dmangam3t@smugmug.com', null, '701-456-2056', '539-692-1438', '432-732-1643');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Imogene Hatzar', 'ihatzar3u@aol.com', '2020-10-22', '537-891-9732', '843-860-2664', '768-794-1116');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Olenka Pala', 'opala3v@dailymail.co.uk', '2021-07-13', '244-391-3449', '291-504-6914', '592-406-2656');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Corrie Metcalfe', 'cmetcalfe3w@hostgator.com', null, '966-268-4229', '925-614-8449', '745-796-0038');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Elliott Uwins', 'euwins3x@ezinearticles.com', null, '717-343-8819', '712-135-1548', '951-345-7830');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Connor Wilmott', 'cwilmott3y@squidoo.com', null, '518-736-1204', '446-387-1544', '461-640-4417');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Brook Chatwood', 'bchatwood3z@dell.com', null, '556-182-7988', '443-482-0913', '719-453-5269');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Myrna Keningley', 'mkeningley40@nymag.com', null, '309-813-9114', '627-864-7020', '350-379-2476');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ginger Carillo', 'gcarillo41@simplemachines.org', null, '834-666-7197', '200-371-2413', '544-364-0759');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Waring Leyshon', 'wleyshon42@scribd.com', null, '722-850-5657', '217-515-1176', '812-676-2634');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Felicle Mersey', 'fmersey43@economist.com', null, '240-806-8492', '274-317-4620', '794-284-9926');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Loreen Kernell', 'lkernell44@newyorker.com', null, '688-983-2918', '195-948-4875', '240-250-7578');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bent Warkup', 'bwarkup45@wikimedia.org', '2020-08-06', '701-343-9549', '913-859-9523', '302-515-6844');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cesare Basilone', 'cbasilone46@wunderground.com', null, '151-667-3693', '520-361-4099', '469-153-8464');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kendal Arsmith', 'karsmith47@bing.com', null, '649-430-7732', '497-617-3863', '565-492-6891');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Marlena Costy', 'mcosty48@infoseek.co.jp', null, '231-911-6667', '299-317-2487', '317-741-4845');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cathryn Klesl', 'cklesl49@umich.edu', null, '784-297-8454', '657-638-1113', '833-965-1689');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Anders Jurs', 'ajurs4a@livejournal.com', null, '881-755-9501', '475-891-5162', '706-578-7633');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Merrel Honsch', 'mhonsch4b@rediff.com', '2020-05-13', '938-147-5426', '737-341-5268', '594-478-0485');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Horst Humpage', 'hhumpage4c@cnn.com', null, '748-599-5755', '139-751-9525', '637-249-4137');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Pearline Beall', 'pbeall4d@storify.com', null, '777-130-8196', '520-818-1176', '424-656-1489');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Chaddy Hosten', 'chosten4e@yelp.com', null, '845-584-8489', '589-195-8018', '519-299-7707');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hildagarde Ewens', 'hewens4f@google.cn', null, '316-142-3487', '739-801-7745', '833-417-2492');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kalli Bretton', 'kbretton4g@sbwire.com', '2021-04-12', '524-405-7778', '549-410-3187', '121-169-7297');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Renata Tillman', 'rtillman4h@time.com', null, '651-741-5450', '781-860-6618', '581-784-3521');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kikelia Jelks', 'kjelks4i@bravesites.com', null, '898-155-1508', '537-770-9552', '374-823-1979');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Flory Lukianovich', 'flukianovich4j@4shared.com', null, '184-522-3385', '502-505-9044', '654-200-7516');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Maddalena Haglinton', 'mhaglinton4k@ehow.com', null, '487-382-3696', '935-564-6591', '517-497-3091');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Peterus Brockett', 'pbrockett4l@yellowpages.com', null, '670-797-0635', '154-132-4537', '686-703-4755');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Adamo Paramor', 'aparamor4m@ocn.ne.jp', null, '779-503-1450', '602-167-9346', '740-934-7074');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ruperta Smiz', 'rsmiz4n@lulu.com', null, '106-473-8165', '502-960-3893', '152-394-3202');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Meggie Sinton', 'msinton4o@businessweek.com', null, '197-316-8781', '894-678-2488', '848-851-8151');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gino Othick', 'gothick4p@youku.com', null, '414-434-5647', '716-467-1642', '149-224-0951');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Angelique Slateford', 'aslateford4q@ameblo.jp', null, '940-923-5383', '149-710-5849', '651-979-9555');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Troy Saunderson', 'tsaunderson4r@xrea.com', '2021-09-29', '633-871-7084', '267-527-4702', '153-201-0383');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Nellie Cansfield', 'ncansfield4s@gmpg.org', null, '778-473-1829', '654-926-1943', '557-454-8003');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jarib Child', 'jchild4t@feedburner.com', null, '395-964-8231', '940-789-9521', '319-406-4043');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Faith Bradd', 'fbradd4u@cloudflare.com', null, '847-145-0518', '565-546-1825', '746-705-4710');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Horacio Cottem', 'hcottem4v@trellian.com', null, '906-945-2572', '323-965-2088', '806-543-4802');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fredrika Braithwait', 'fbraithwait4w@devhub.com', null, '317-427-5057', '924-492-7926', '211-957-8739');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lin Melross', 'lmelross4x@over-blog.com', null, '254-587-5889', '305-600-3165', '935-984-4333');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Margi Nethercott', 'mnethercott4y@scientificamerican.com', null, '307-545-2490', '502-395-2763', '807-571-9106');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Calhoun Korneichuk', 'ckorneichuk4z@artisteer.com', null, '772-954-4567', '666-847-9609', '383-933-9981');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sisile Eneas', 'seneas50@msu.edu', null, '636-470-8849', '195-935-5344', '337-297-3118');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ann-marie Goatman', 'agoatman51@cisco.com', '2021-08-24', '875-754-9866', '903-939-0713', '281-936-2978');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Brigham Hatfield', 'bhatfield52@usgs.gov', null, '468-448-8163', '749-760-3037', '704-522-5629');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Krystyna Cosgrave', 'kcosgrave53@ebay.co.uk', null, '384-678-2602', '579-727-1314', '643-928-9264');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Humbert Pedrollo', 'hpedrollo54@blinklist.com', null, '236-674-0271', '265-906-0348', '886-872-0518');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ange Stienham', 'astienham55@hp.com', null, '704-986-6884', '573-571-0670', '971-775-3444');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kaitlynn Maruszewski', 'kmaruszewski56@posterous.com', null, '681-369-7395', '947-966-8835', '170-237-6494');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Frankie Daid', 'fdaid57@vkontakte.ru', null, '764-833-3462', '541-952-8232', '884-804-0664');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Briant Repp', 'brepp58@boston.com', null, '260-227-1659', '929-759-7584', '766-649-5857');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gabey Ickeringill', 'gickeringill59@hao123.com', null, '248-965-3129', '771-290-1724', '322-927-0123');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lucien Leaver', 'lleaver5a@shop-pro.jp', null, '390-655-6902', '563-720-0926', '814-436-2980');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Zita Hobgen', 'zhobgen5b@economist.com', null, '131-674-9718', '627-478-1091', '886-706-4449');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Shena Hinemoor', 'shinemoor5c@tumblr.com', null, '153-356-0315', '510-801-3079', '246-154-0145');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sven Moore', 'smoore5d@eepurl.com', null, '602-857-1941', '541-975-6659', '897-459-8956');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sena Plumer', 'splumer5e@studiopress.com', '2020-01-05', '307-470-7199', '883-505-2287', '256-842-1255');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hunfredo McGlashan', 'hmcglashan5f@nbcnews.com', null, '732-631-2172', '200-325-8377', '840-635-6173');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Farris Steffan', 'fsteffan5g@meetup.com', null, '427-847-6098', '308-812-0366', '245-479-3122');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Janessa Anderton', 'janderton5h@techcrunch.com', null, '118-434-8900', '791-323-7669', '318-660-3602');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tracee Tillard', 'ttillard5i@latimes.com', null, '560-790-3229', '273-440-1181', '477-203-5059');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Devin Blatcher', 'dblatcher5j@engadget.com', null, '313-797-0845', '926-258-8256', '637-707-5620');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fern Yon', 'fyon5k@gizmodo.com', null, '327-741-0581', '701-929-0671', '747-981-2440');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fae Millward', 'fmillward5l@house.gov', null, '548-120-5441', '769-973-6065', '608-266-0833');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Etty Hastelow', 'ehastelow5m@reuters.com', null, '113-152-0315', '449-416-0606', '740-766-3728');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Erskine Manley', 'emanley5n@barnesandnoble.com', null, '107-700-8047', '404-203-7805', '275-146-9333');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ronalda Ireson', 'rireson5o@toplist.cz', null, '117-722-2919', '726-832-3563', '721-293-3554');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kettie Fitzsymonds', 'kfitzsymonds5p@mlb.com', null, '135-581-4090', '962-167-5025', '322-437-8643');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Miller Ianizzi', 'mianizzi5q@sohu.com', null, '493-501-8841', '505-453-9962', '921-634-9758');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Warde Suddock', 'wsuddock5r@sourceforge.net', null, '605-309-4276', '847-661-9823', '580-267-0360');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jackie Synnott', 'jsynnott5s@tumblr.com', null, '343-366-0914', '365-289-0819', '698-367-4116');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Wendeline Sandwich', 'wsandwich5t@foxnews.com', null, '337-122-8093', '713-855-4205', '724-522-8562');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Danice McCutcheon', 'dmccutcheon5u@omniture.com', null, '814-948-9763', '791-679-5305', '237-692-0364');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hyatt Donalson', 'hdonalson5v@clickbank.net', null, '302-829-5523', '494-837-1814', '567-548-9077');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Hunter St Ledger', 'hst5w@sfgate.com', '2020-09-26', '230-789-5920', '903-444-6883', '909-450-4093');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Zacharia Haresnaip', 'zharesnaip5x@webeden.co.uk', null, '597-361-8107', '486-370-1970', '728-549-9375');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Minda Bello', 'mbello5y@typepad.com', null, '906-731-0285', '560-282-4506', '533-268-7279');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jessamyn Penny', 'jpenny5z@soundcloud.com', null, '815-709-0306', '477-381-7272', '906-450-6609');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Elaine Belsey', 'ebelsey60@google.es', null, '502-507-2600', '494-189-4639', '659-220-8331');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Waldon Blackley', 'wblackley61@goo.gl', null, '349-632-0872', '104-558-8818', '337-446-9551');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Dorelia Woodbridge', 'dwoodbridge62@admin.ch', null, '292-727-8704', '445-736-1876', '271-863-4164');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Michaeline Cortes', 'mcortes63@npr.org', null, '412-762-6998', '966-291-6000', '245-771-3271');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Marrilee Cockarill', 'mcockarill64@umich.edu', null, '742-739-4083', '332-242-6213', '609-534-5166');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bobine Titterrell', 'btitterrell65@tinyurl.com', null, '340-864-4837', '308-177-7745', '593-729-3765');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Marillin Favell', 'mfavell66@xinhuanet.com', null, '615-854-6897', '245-804-4743', '735-278-3264');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tripp Godfroy', 'tgodfroy67@yahoo.co.jp', null, '156-209-0826', '859-715-3315', '305-846-5911');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Brandy Algate', 'balgate68@cbslocal.com', null, '546-196-9254', '125-992-6161', '326-251-7102');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tabbie Willmetts', 'twillmetts69@apache.org', null, '434-322-4982', '610-695-8329', '981-924-7454');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Pammi Stoop', 'pstoop6a@narod.ru', null, '911-900-3072', '383-551-2309', '470-745-2765');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fredia Campey', 'fcampey6b@tumblr.com', null, '270-708-1759', '474-970-9173', '552-984-0139');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cornie Travis', 'ctravis6c@sakura.ne.jp', null, '855-906-6503', '979-668-5985', '786-742-0219');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Roman Dear', 'rdear6d@google.co.uk', null, '601-292-6412', '643-186-2226', '820-819-0243');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Annetta Dunkerk', 'adunkerk6e@bloomberg.com', '2020-03-17', '799-341-7584', '859-794-4035', '316-939-6397');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lezley MacParland', 'lmacparland6f@reference.com', null, '402-425-9932', '851-930-0204', '833-191-4192');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Carri Shalcros', 'cshalcros6g@histats.com', null, '630-168-3859', '273-750-1197', '818-142-5362');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Amalie Fake', 'afake6h@odnoklassniki.ru', null, '630-261-5683', '447-880-7079', '764-484-3448');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ingemar Scrimgeour', 'iscrimgeour6i@time.com', null, '296-978-8966', '147-282-5012', '651-543-8938');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lola Avery', 'lavery6j@adobe.com', '2021-04-29', '333-349-9509', '530-998-9229', '307-582-3706');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Eleanore Rawles', 'erawles6k@rediff.com', null, '813-247-7971', '707-782-0151', '222-664-0521');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Nonnah Grinsted', 'ngrinsted6l@economist.com', null, '764-154-5659', '177-415-2318', '620-373-3942');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kristine Rooson', 'krooson6m@wikimedia.org', null, '470-778-0732', '127-526-3718', '511-557-8380');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Devland Ranshaw', 'dranshaw6n@netscape.com', null, '353-846-3811', '136-615-7429', '294-729-1200');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bee Fines', 'bfines6o@telegraph.co.uk', '2021-06-18', '353-253-3761', '671-352-0665', '629-375-9308');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Martin Frewer', 'mfrewer6p@prlog.org', null, '464-976-4025', '408-223-7421', '223-537-1331');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Juieta Coton', 'jcoton6q@freewebs.com', null, '113-530-8445', '620-309-5829', '757-339-5770');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lari Franschini', 'lfranschini6r@netvibes.com', null, '803-439-7459', '522-708-9350', '180-323-8635');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Justin Oats', 'joats6s@spotify.com', null, '317-956-2582', '216-483-8884', '825-792-4149');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tanny Haggith', 'thaggith6t@hubpages.com', null, '162-962-7873', '917-308-7738', '793-435-7121');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gerardo Vye', 'gvye6u@samsung.com', null, '125-316-1358', '253-471-8071', '349-171-2492');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Shep Terbrug', 'sterbrug6v@sun.com', null, '195-784-4653', '164-916-6709', '255-474-2814');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Giles Drohane', 'gdrohane6w@vk.com', null, '759-149-6737', '410-312-1073', '803-665-3379');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jenilee Alejo', 'jalejo6x@amazon.de', null, '487-762-3134', '597-477-7024', '869-670-3177');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Vassili Ackerley', 'vackerley6y@answers.com', null, '110-993-1725', '178-266-5350', '836-285-5737');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Danila Naisey', 'dnaisey6z@cloudflare.com', null, '138-113-6029', '453-676-5267', '280-245-0538');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Milt Moyle', 'mmoyle70@nymag.com', null, '600-892-9703', '439-279-3089', '345-401-7087');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Rubi Gilleson', 'rgilleson71@home.pl', null, '368-568-8325', '701-416-6562', '837-721-0768');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ursula Airy', 'uairy72@thetimes.co.uk', '2020-10-15', '590-652-4594', '704-601-5649', '252-342-3289');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Fina Piaggia', 'fpiaggia73@columbia.edu', null, '298-343-4440', '669-510-2308', '660-246-5045');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Dulcia Taw', 'dtaw74@webmd.com', '2021-03-22', '103-608-8215', '537-199-2976', '821-222-5077');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jsandye Fontenot', 'jfontenot75@yandex.ru', null, '712-991-6609', '409-670-2468', '961-662-8082');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Bonita Wroath', 'bwroath76@house.gov', '2021-01-03', '612-965-6573', '687-940-8151', '344-699-8730');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Jemmy Phizakarley', 'jphizakarley77@arstechnica.com', null, '204-939-8639', '365-940-8582', '113-674-0472');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Vanny Isbell', 'visbell78@upenn.edu', null, '327-964-6906', '802-137-9362', '981-703-2174');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ashly Aldwinckle', 'aaldwinckle79@omniture.com', '2021-04-12', '995-476-5081', '577-184-3742', '901-935-6468');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Roxane Rubi', 'rrubi7a@apache.org', null, '285-705-8263', '732-843-3855', '573-526-1015');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Karola Stenson', 'kstenson7b@biblegateway.com', null, '891-127-6722', '135-393-6555', '993-312-1070');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Farrel Soonhouse', 'fsoonhouse7c@sohu.com', null, '744-613-0485', '604-635-2984', '801-645-0404');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Arie Sagerson', 'asagerson7d@soundcloud.com', '2020-06-25', '929-866-0886', '799-738-7531', '204-834-8640');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Karoline Watkiss', 'kwatkiss7e@opera.com', null, '770-396-7289', '797-816-6209', '295-277-3690');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Kimble Gianni', 'kgianni7f@163.com', null, '733-440-8573', '115-473-9508', '267-717-9515');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cchaddie Tritten', 'ctritten7g@taobao.com', null, '277-323-4969', '827-173-2011', '669-356-5308');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Glenn Giovanni', 'ggiovanni7h@ucoz.com', '2020-09-16', '154-455-7150', '973-526-8031', '971-759-5237');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Rebe Parnall', 'rparnall7i@timesonline.co.uk', null, '229-122-9685', '270-389-9736', '971-650-8812');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Louie Andren', 'landren7j@google.com.hk', null, '547-326-4031', '944-766-0765', '943-146-9305');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('York Dundendale', 'ydundendale7k@livejournal.com', null, '990-132-0064', '132-596-5540', '867-787-1196');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Courtney Wilman', 'cwilman7l@reuters.com', null, '658-467-1813', '552-430-4509', '480-872-8264');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Karyn Butterfield', 'kbutterfield7m@prlog.org', null, '106-136-3086', '859-541-2606', '620-231-3472');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Ab Wynch', 'awynch7n@dmoz.org', null, '677-520-6055', '991-942-7179', '916-249-1038');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Patrizia Raulstone', 'praulstone7o@theglobeandmail.com', null, '641-493-7875', '338-985-2162', '106-122-6230');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Mariska McLeish', 'mmcleish7p@unesco.org', null, '846-565-2411', '999-333-8612', '829-889-4949');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gaylene Burgoin', 'gburgoin7q@yale.edu', null, '113-417-2311', '229-112-7858', '605-547-1174');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Alica Bartrop', 'abartrop7r@wordpress.org', null, '505-126-9721', '934-187-5448', '780-670-8528');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Layton Chown', 'lchown7s@columbia.edu', null, '175-830-9092', '845-761-6449', '991-165-0609');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Thomasin Juschka', 'tjuschka7t@businesswire.com', null, '154-894-2331', '934-284-9296', '647-239-8473');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Leif Sproston', 'lsproston7u@jigsy.com', null, '880-227-4664', '827-188-4370', '473-461-3690');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Tamiko Knevet', 'tknevet7v@topsy.com', '2020-05-04', '605-167-2461', '569-544-9699', '223-847-3831');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Auberon Wilfing', 'awilfing7w@jalbum.net', '2020-05-31', '753-809-2513', '277-481-4913', '361-264-0873');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Lori Wrenn', 'lwrenn7x@de.vu', null, '581-274-5024', '497-550-2539', '426-913-0569');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Rudolph Cheales', 'rcheales7y@va.gov', null, '211-364-4525', '236-976-0749', '708-128-9448');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Faith Cattlemull', 'fcattlemull7z@wiley.com', null, '258-788-8568', '861-472-7338', '548-195-2572');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Angeli Caselick', 'acaselick80@imageshack.us', null, '483-811-6867', '846-499-6104', '903-643-9741');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Waylen Yell', 'wyell81@amazon.co.uk', null, '610-473-6948', '361-419-2879', '609-321-8134');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Sascha Jessard', 'sjessard82@mysql.com', null, '721-887-7010', '652-576-9201', '255-446-1408');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Garrik Benfell', 'gbenfell83@europa.eu', null, '482-880-2837', '676-691-6329', '216-343-0496');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Andy Gosson', 'agosson84@rediff.com', null, '334-447-2053', '781-187-3764', '597-839-9284');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Torie Westraw', 'twestraw85@php.net', null, '901-776-2766', '537-641-6674', '962-957-6155');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Aaren Bowcock', 'abowcock86@mac.com', null, '492-801-8438', '770-997-8612', '545-202-2278');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Merrel Arnot', 'marnot87@omniture.com', null, '695-595-3598', '211-192-0984', '110-749-3873');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Judie Philler', 'jphiller88@topsy.com', null, '162-449-7305', '366-365-3515', '608-713-7494');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gawen Smees', 'gsmees89@surveymonkey.com', null, '983-679-6020', '553-110-2357', '935-129-1050');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Morrie Dalbey', 'mdalbey8a@noaa.gov', null, '529-916-7501', '103-866-8578', '647-362-6049');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Grete Simonot', 'gsimonot8b@naver.com', null, '258-874-4435', '237-524-5339', '212-600-4086');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Berkeley Dainter', 'bdainter0@smh.com.au', null, '750-530-0183', '106-509-4789', '307-998-6747');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Cullie Mylchreest', 'cmylchreest1@tmall.com', null, '352-840-9074', '897-689-6224', '177-847-4688');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Gherardo Stannard', 'gstannard2@walmart.com', null, '739-639-0591', '772-506-4440', '682-569-3522');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Emilio Ebbetts', 'eebbetts3@amazon.co.uk', null, '940-426-5306', '411-711-5620', '822-124-1600');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Letti Divina', 'ldivina4@globo.com', null, '582-275-4674', '291-756-7929', '111-852-5753');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Billie Lankester', 'blankester5@examiner.com', null, '663-938-5233', '457-595-3519', '726-101-6861');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Westleigh Kennermann', 'wkennermann6@oracle.com', null, '464-825-9470', '180-450-5682', '626-219-4536');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Faustina Newell', 'fnewell7@dailymail.co.uk', null, '971-471-3651', '945-516-6920', '600-110-4195');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Leonhard Yearnsley', 'lyearnsley8@surveymonkey.com', null, '220-141-0689', '577-322-9489', '421-550-0384');
+insert into Employees (ename, email, resign_date, home_number, mobile_number, office_number) values ('Griz Weddell', 'gweddell9@flavors.me', null, '862-291-1491', '148-147-0603', '525-590-6456');
+
+insert into HealthDeclaration (eid, date, temp) values (1, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (2, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (3, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (4, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (5, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (6, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (7, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (8, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (9, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (10, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (11, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (12, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (13, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (14, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (15, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (16, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (17, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (18, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (19, '2021-10-17', 37.6);
+insert into HealthDeclaration (eid, date, temp) values (20, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (21, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (22, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (23, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (24, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (25, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (26, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (27, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (28, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (29, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (30, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (31, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (32, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (33, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (34, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (35, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (36, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (37, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (38, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (39, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (40, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (41, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (42, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (43, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (44, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (45, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (46, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (47, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (48, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (49, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (50, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (51, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (52, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (53, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (54, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (55, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (56, '2021-10-17', 37.6);
+insert into HealthDeclaration (eid, date, temp) values (57, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (58, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (59, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (60, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (61, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (62, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (63, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (64, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (65, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (66, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (67, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (68, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (69, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (70, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (71, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (72, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (73, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (74, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (75, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (76, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (77, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (78, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (79, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (80, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (81, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (82, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (83, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (84, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (85, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (86, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (87, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (88, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (89, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (90, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (91, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (92, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (93, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (94, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (95, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (96, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (97, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (98, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (99, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (100, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (101, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (102, '2021-10-17', 37.6);
+insert into HealthDeclaration (eid, date, temp) values (103, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (104, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (105, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (106, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (107, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (108, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (109, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (110, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (111, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (112, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (113, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (114, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (115, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (116, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (117, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (118, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (119, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (120, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (121, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (122, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (123, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (124, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (125, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (126, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (127, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (128, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (129, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (130, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (131, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (132, '2021-10-17', 37.6);
+insert into HealthDeclaration (eid, date, temp) values (133, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (134, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (135, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (136, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (137, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (138, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (139, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (140, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (141, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (142, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (143, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (144, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (145, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (146, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (147, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (148, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (149, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (150, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (151, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (152, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (153, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (154, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (155, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (156, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (157, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (158, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (159, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (160, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (161, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (162, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (163, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (164, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (165, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (166, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (167, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (168, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (169, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (170, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (171, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (172, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (173, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (174, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (175, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (176, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (177, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (178, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (179, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (180, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (181, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (182, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (183, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (184, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (185, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (186, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (187, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (188, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (189, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (190, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (191, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (192, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (193, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (194, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (195, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (196, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (197, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (198, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (199, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (200, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (201, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (202, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (203, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (204, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (205, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (206, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (207, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (208, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (209, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (210, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (211, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (212, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (213, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (214, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (215, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (216, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (217, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (218, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (219, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (220, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (221, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (222, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (223, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (224, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (225, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (226, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (227, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (228, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (229, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (230, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (231, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (232, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (233, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (234, '2021-10-17', 36.3);
+insert into HealthDeclaration (eid, date, temp) values (235, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (236, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (237, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (238, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (239, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (240, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (241, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (242, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (243, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (244, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (245, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (246, '2021-10-17', 36.4);
+insert into HealthDeclaration (eid, date, temp) values (247, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (248, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (249, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (250, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (251, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (252, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (253, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (254, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (255, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (256, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (257, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (258, '2021-10-17', 37.2);
+insert into HealthDeclaration (eid, date, temp) values (259, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (260, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (261, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (262, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (263, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (264, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (265, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (266, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (267, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (268, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (269, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (270, '2021-10-17', 37.6);
+insert into HealthDeclaration (eid, date, temp) values (271, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (272, '2021-10-17', 36.9);
+insert into HealthDeclaration (eid, date, temp) values (273, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (274, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (275, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (276, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (277, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (278, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (279, '2021-10-17', 36.8);
+insert into HealthDeclaration (eid, date, temp) values (280, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (281, '2021-10-17', 37.0);
+insert into HealthDeclaration (eid, date, temp) values (282, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (283, '2021-10-17', 36.6);
+insert into HealthDeclaration (eid, date, temp) values (284, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (285, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (286, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (287, '2021-10-17', 35.8);
+insert into HealthDeclaration (eid, date, temp) values (288, '2021-10-17', 37.1);
+insert into HealthDeclaration (eid, date, temp) values (289, '2021-10-17', 37.5);
+insert into HealthDeclaration (eid, date, temp) values (290, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (291, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (292, '2021-10-17', 37.3);
+insert into HealthDeclaration (eid, date, temp) values (293, '2021-10-17', 36.2);
+insert into HealthDeclaration (eid, date, temp) values (294, '2021-10-17', 35.9);
+insert into HealthDeclaration (eid, date, temp) values (295, '2021-10-17', 37.4);
+insert into HealthDeclaration (eid, date, temp) values (296, '2021-10-17', 36.7);
+insert into HealthDeclaration (eid, date, temp) values (297, '2021-10-17', 36.5);
+insert into HealthDeclaration (eid, date, temp) values (298, '2021-10-17', 36.1);
+insert into HealthDeclaration (eid, date, temp) values (299, '2021-10-17', 36.0);
+insert into HealthDeclaration (eid, date, temp) values (300, '2021-10-17', 36.2);
+
+insert into Juniors (eid) values (1);
+insert into Juniors (eid) values (2);
+insert into Juniors (eid) values (3);
+insert into Juniors (eid) values (4);
+insert into Juniors (eid) values (5);
+insert into Juniors (eid) values (6);
+insert into Juniors (eid) values (7);
+insert into Juniors (eid) values (8);
+insert into Juniors (eid) values (9);
+insert into Juniors (eid) values (10);
+insert into Juniors (eid) values (11);
+insert into Juniors (eid) values (12);
+insert into Juniors (eid) values (13);
+insert into Juniors (eid) values (14);
+insert into Juniors (eid) values (15);
+insert into Juniors (eid) values (16);
+insert into Juniors (eid) values (17);
+insert into Juniors (eid) values (18);
+insert into Juniors (eid) values (19);
+insert into Juniors (eid) values (20);
+insert into Juniors (eid) values (21);
+insert into Juniors (eid) values (22);
+insert into Juniors (eid) values (23);
+insert into Juniors (eid) values (24);
+insert into Juniors (eid) values (25);
+insert into Juniors (eid) values (26);
+insert into Juniors (eid) values (27);
+insert into Juniors (eid) values (28);
+insert into Juniors (eid) values (29);
+insert into Juniors (eid) values (30);
+insert into Juniors (eid) values (31);
+insert into Juniors (eid) values (32);
+insert into Juniors (eid) values (33);
+insert into Juniors (eid) values (34);
+insert into Juniors (eid) values (35);
+insert into Juniors (eid) values (36);
+insert into Juniors (eid) values (37);
+insert into Juniors (eid) values (38);
+insert into Juniors (eid) values (39);
+insert into Juniors (eid) values (40);
+insert into Juniors (eid) values (41);
+insert into Juniors (eid) values (42);
+insert into Juniors (eid) values (43);
+insert into Juniors (eid) values (44);
+insert into Juniors (eid) values (45);
+insert into Juniors (eid) values (46);
+insert into Juniors (eid) values (47);
+insert into Juniors (eid) values (48);
+insert into Juniors (eid) values (49);
+insert into Juniors (eid) values (50);
+insert into Juniors (eid) values (51);
+insert into Juniors (eid) values (52);
+insert into Juniors (eid) values (53);
+insert into Juniors (eid) values (54);
+insert into Juniors (eid) values (55);
+insert into Juniors (eid) values (56);
+insert into Juniors (eid) values (57);
+insert into Juniors (eid) values (58);
+insert into Juniors (eid) values (59);
+insert into Juniors (eid) values (60);
+insert into Juniors (eid) values (61);
+insert into Juniors (eid) values (62);
+insert into Juniors (eid) values (63);
+insert into Juniors (eid) values (64);
+insert into Juniors (eid) values (65);
+insert into Juniors (eid) values (66);
+insert into Juniors (eid) values (67);
+insert into Juniors (eid) values (68);
+insert into Juniors (eid) values (69);
+insert into Juniors (eid) values (70);
+insert into Juniors (eid) values (71);
+insert into Juniors (eid) values (72);
+insert into Juniors (eid) values (73);
+insert into Juniors (eid) values (74);
+insert into Juniors (eid) values (75);
+insert into Juniors (eid) values (76);
+insert into Juniors (eid) values (77);
+insert into Juniors (eid) values (78);
+insert into Juniors (eid) values (79);
+insert into Juniors (eid) values (80);
+insert into Juniors (eid) values (81);
+insert into Juniors (eid) values (82);
+insert into Juniors (eid) values (83);
+insert into Juniors (eid) values (84);
+insert into Juniors (eid) values (85);
+insert into Juniors (eid) values (86);
+insert into Juniors (eid) values (87);
+insert into Juniors (eid) values (88);
+insert into Juniors (eid) values (89);
+insert into Juniors (eid) values (90);
+insert into Juniors (eid) values (91);
+insert into Juniors (eid) values (92);
+insert into Juniors (eid) values (93);
+insert into Juniors (eid) values (94);
+insert into Juniors (eid) values (95);
+insert into Juniors (eid) values (96);
+insert into Juniors (eid) values (97);
+insert into Juniors (eid) values (98);
+insert into Juniors (eid) values (99);
+insert into Juniors (eid) values (100);
+insert into Juniors (eid) values (101);
+insert into Juniors (eid) values (102);
+insert into Juniors (eid) values (103);
+insert into Juniors (eid) values (104);
+insert into Juniors (eid) values (105);
+insert into Juniors (eid) values (106);
+insert into Juniors (eid) values (107);
+insert into Juniors (eid) values (108);
+insert into Juniors (eid) values (109);
+insert into Juniors (eid) values (110);
+insert into Juniors (eid) values (111);
+insert into Juniors (eid) values (112);
+insert into Juniors (eid) values (113);
+insert into Juniors (eid) values (114);
+insert into Juniors (eid) values (115);
+insert into Juniors (eid) values (116);
+insert into Juniors (eid) values (117);
+insert into Juniors (eid) values (118);
+insert into Juniors (eid) values (119);
+insert into Juniors (eid) values (120);
+insert into Juniors (eid) values (121);
+insert into Juniors (eid) values (122);
+insert into Juniors (eid) values (123);
+insert into Juniors (eid) values (124);
+insert into Juniors (eid) values (125);
+insert into Juniors (eid) values (126);
+insert into Juniors (eid) values (127);
+insert into Juniors (eid) values (128);
+insert into Juniors (eid) values (129);
+insert into Juniors (eid) values (130);
+insert into Juniors (eid) values (131);
+insert into Juniors (eid) values (132);
+insert into Juniors (eid) values (133);
+insert into Juniors (eid) values (134);
+insert into Juniors (eid) values (135);
+insert into Juniors (eid) values (136);
+insert into Juniors (eid) values (137);
+insert into Juniors (eid) values (138);
+insert into Juniors (eid) values (139);
+insert into Juniors (eid) values (140);
+insert into Juniors (eid) values (141);
+insert into Juniors (eid) values (142);
+insert into Juniors (eid) values (143);
+insert into Juniors (eid) values (144);
+insert into Juniors (eid) values (145);
+insert into Juniors (eid) values (146);
+insert into Juniors (eid) values (147);
+insert into Juniors (eid) values (148);
+insert into Juniors (eid) values (149);
+insert into Juniors (eid) values (150);
+insert into Juniors (eid) values (151);
+insert into Juniors (eid) values (152);
+insert into Juniors (eid) values (153);
+insert into Juniors (eid) values (154);
+insert into Juniors (eid) values (155);
+insert into Juniors (eid) values (156);
+insert into Juniors (eid) values (157);
+insert into Juniors (eid) values (158);
+insert into Juniors (eid) values (159);
+insert into Juniors (eid) values (160);
+insert into Juniors (eid) values (161);
+insert into Juniors (eid) values (162);
+insert into Juniors (eid) values (163);
+insert into Juniors (eid) values (164);
+insert into Juniors (eid) values (165);
+insert into Juniors (eid) values (166);
+insert into Juniors (eid) values (167);
+insert into Juniors (eid) values (168);
+insert into Juniors (eid) values (169);
+insert into Juniors (eid) values (170);
+insert into Juniors (eid) values (171);
+insert into Juniors (eid) values (172);
+insert into Juniors (eid) values (173);
+insert into Juniors (eid) values (174);
+insert into Juniors (eid) values (175);
+insert into Juniors (eid) values (176);
+insert into Juniors (eid) values (177);
+insert into Juniors (eid) values (178);
+insert into Juniors (eid) values (179);
+insert into Juniors (eid) values (180);
+insert into Juniors (eid) values (181);
+insert into Juniors (eid) values (182);
+insert into Juniors (eid) values (183);
+insert into Juniors (eid) values (184);
+insert into Juniors (eid) values (185);
+insert into Juniors (eid) values (186);
+insert into Juniors (eid) values (187);
+insert into Juniors (eid) values (188);
+insert into Juniors (eid) values (189);
+insert into Juniors (eid) values (190);
+insert into Juniors (eid) values (191);
+insert into Juniors (eid) values (192);
+insert into Juniors (eid) values (193);
+insert into Juniors (eid) values (194);
+insert into Juniors (eid) values (195);
+insert into Juniors (eid) values (196);
+insert into Juniors (eid) values (197);
+insert into Juniors (eid) values (198);
+insert into Juniors (eid) values (199);
+insert into Juniors (eid) values (200);
+insert into Juniors (eid) values (201);
+insert into Juniors (eid) values (202);
+insert into Juniors (eid) values (203);
+insert into Juniors (eid) values (204);
+insert into Juniors (eid) values (205);
+insert into Juniors (eid) values (206);
+insert into Juniors (eid) values (207);
+insert into Juniors (eid) values (208);
+insert into Juniors (eid) values (209);
+insert into Juniors (eid) values (210);
+insert into Juniors (eid) values (211);
+insert into Juniors (eid) values (212);
+insert into Juniors (eid) values (213);
+insert into Juniors (eid) values (214);
+insert into Juniors (eid) values (215);
+insert into Juniors (eid) values (216);
+insert into Juniors (eid) values (217);
+insert into Juniors (eid) values (218);
+insert into Juniors (eid) values (219);
+insert into Juniors (eid) values (220);
+insert into Juniors (eid) values (221);
+insert into Juniors (eid) values (222);
+insert into Juniors (eid) values (223);
+insert into Juniors (eid) values (224);
+insert into Juniors (eid) values (225);
+insert into Juniors (eid) values (226);
+insert into Juniors (eid) values (227);
+insert into Juniors (eid) values (228);
+insert into Juniors (eid) values (229);
+insert into Juniors (eid) values (230);
+insert into Juniors (eid) values (231);
+insert into Juniors (eid) values (232);
+insert into Juniors (eid) values (233);
+insert into Juniors (eid) values (234);
+insert into Juniors (eid) values (235);
+insert into Juniors (eid) values (236);
+insert into Juniors (eid) values (237);
+insert into Juniors (eid) values (238);
+insert into Juniors (eid) values (239);
+insert into Juniors (eid) values (240);
+insert into Juniors (eid) values (241);
+insert into Juniors (eid) values (242);
+insert into Juniors (eid) values (243);
+insert into Juniors (eid) values (244);
+insert into Juniors (eid) values (245);
+insert into Juniors (eid) values (246);
+insert into Juniors (eid) values (247);
+insert into Juniors (eid) values (248);
+insert into Juniors (eid) values (249);
+insert into Juniors (eid) values (250);
+
+insert into Bookers (eid) values (251);
+insert into Bookers (eid) values (252);
+insert into Bookers (eid) values (253);
+insert into Bookers (eid) values (254);
+insert into Bookers (eid) values (255);
+insert into Bookers (eid) values (256);
+insert into Bookers (eid) values (257);
+insert into Bookers (eid) values (258);
+insert into Bookers (eid) values (259);
+insert into Bookers (eid) values (260);
+insert into Bookers (eid) values (261);
+insert into Bookers (eid) values (262);
+insert into Bookers (eid) values (263);
+insert into Bookers (eid) values (264);
+insert into Bookers (eid) values (265);
+insert into Bookers (eid) values (266);
+insert into Bookers (eid) values (267);
+insert into Bookers (eid) values (268);
+insert into Bookers (eid) values (269);
+insert into Bookers (eid) values (270);
+insert into Bookers (eid) values (271);
+insert into Bookers (eid) values (272);
+insert into Bookers (eid) values (273);
+insert into Bookers (eid) values (274);
+insert into Bookers (eid) values (275);
+insert into Bookers (eid) values (276);
+insert into Bookers (eid) values (277);
+insert into Bookers (eid) values (278);
+insert into Bookers (eid) values (279);
+insert into Bookers (eid) values (280);
+insert into Bookers (eid) values (281);
+insert into Bookers (eid) values (282);
+insert into Bookers (eid) values (283);
+insert into Bookers (eid) values (284);
+insert into Bookers (eid) values (285);
+insert into Bookers (eid) values (286);
+insert into Bookers (eid) values (287);
+insert into Bookers (eid) values (288);
+insert into Bookers (eid) values (289);
+insert into Bookers (eid) values (290);
+insert into Bookers (eid) values (291);
+insert into Bookers (eid) values (292);
+insert into Bookers (eid) values (293);
+insert into Bookers (eid) values (294);
+insert into Bookers (eid) values (295);
+insert into Bookers (eid) values (296);
+insert into Bookers (eid) values (297);
+insert into Bookers (eid) values (298);
+insert into Bookers (eid) values (299);
+insert into Bookers (eid) values (300);
+insert into Bookers (eid) values (301);
+insert into Bookers (eid) values (302);
+insert into Bookers (eid) values (303);
+insert into Bookers (eid) values (304);
+insert into Bookers (eid) values (305);
+insert into Bookers (eid) values (306);
+insert into Bookers (eid) values (307);
+insert into Bookers (eid) values (308);
+insert into Bookers (eid) values (309);
+insert into Bookers (eid) values (310);
+
+insert into Seniors (eid) values (251);
+insert into Seniors (eid) values (252);
+insert into Seniors (eid) values (253);
+insert into Seniors (eid) values (254);
+insert into Seniors (eid) values (255);
+insert into Seniors (eid) values (256);
+insert into Seniors (eid) values (257);
+insert into Seniors (eid) values (258);
+insert into Seniors (eid) values (259);
+insert into Seniors (eid) values (260);
+insert into Seniors (eid) values (261);
+insert into Seniors (eid) values (262);
+insert into Seniors (eid) values (263);
+insert into Seniors (eid) values (264);
+insert into Seniors (eid) values (265);
+insert into Seniors (eid) values (266);
+insert into Seniors (eid) values (267);
+insert into Seniors (eid) values (268);
+insert into Seniors (eid) values (269);
+insert into Seniors (eid) values (270);
+insert into Seniors (eid) values (271);
+insert into Seniors (eid) values (272);
+insert into Seniors (eid) values (273);
+insert into Seniors (eid) values (274);
+insert into Seniors (eid) values (275);
+insert into Seniors (eid) values (276);
+insert into Seniors (eid) values (277);
+insert into Seniors (eid) values (278);
+insert into Seniors (eid) values (279);
+insert into Seniors (eid) values (280);
+insert into Seniors (eid) values (281);
+insert into Seniors (eid) values (282);
+insert into Seniors (eid) values (283);
+insert into Seniors (eid) values (284);
+insert into Seniors (eid) values (285);
+insert into Seniors (eid) values (286);
+insert into Seniors (eid) values (287);
+insert into Seniors (eid) values (288);
+insert into Seniors (eid) values (289);
+insert into Seniors (eid) values (290);
+
+insert into Managers (eid) values (291);
+insert into Managers (eid) values (292);
+insert into Managers (eid) values (293);
+insert into Managers (eid) values (294);
+insert into Managers (eid) values (295);
+insert into Managers (eid) values (296);
+insert into Managers (eid) values (297);
+insert into Managers (eid) values (298);
+insert into Managers (eid) values (299);
+insert into Managers (eid) values (300);
+insert into Managers (eid) values (301);
+insert into Managers (eid) values (302);
+insert into Managers (eid) values (303);
+insert into Managers (eid) values (304);
+insert into Managers (eid) values (305);
+insert into Managers (eid) values (306);
+insert into Managers (eid) values (307);
+insert into Managers (eid) values (308);
+insert into Managers (eid) values (309);
+insert into Managers (eid) values (310);
+
+insert into MeetingRooms (floor, room, rname) values (1, 1, 'Beeg Yoshi');
+insert into MeetingRooms (floor, room, rname) values (1, 2, 'Toad');
+insert into MeetingRooms (floor, room, rname) values (1, 3, 'Mario');
+insert into MeetingRooms (floor, room, rname) values (1, 4, 'Luigi');
+insert into MeetingRooms (floor, room, rname) values (1, 5, 'Bowser');
+insert into MeetingRooms (floor, room, rname) values (1, 6, 'Peach');
+insert into MeetingRooms (floor, room, rname) values (2, 1, 'Kirk');
+insert into MeetingRooms (floor, room, rname) values (2, 2, 'Picard');
+insert into MeetingRooms (floor, room, rname) values (2, 3, 'Sisko');
+insert into MeetingRooms (floor, room, rname) values (2, 4, 'Janeway');
+insert into MeetingRooms (floor, room, rname) values (2, 5, 'Archer');
+insert into MeetingRooms (floor, room, rname) values (3, 1, 'Homer');
+insert into MeetingRooms (floor, room, rname) values (3, 2, 'Bart');
+insert into MeetingRooms (floor, room, rname) values (3, 3, 'Lisa');
+insert into MeetingRooms (floor, room, rname) values (3, 4, 'Marge');
+insert into MeetingRooms (floor, room, rname) values (3, 5, 'Ralph');
+insert into MeetingRooms (floor, room, rname) values (3, 6, 'Moe');
+insert into MeetingRooms (floor, room, rname) values (4, 1, 'Baratheon');
+insert into MeetingRooms (floor, room, rname) values (4, 2, 'Stark');
+insert into MeetingRooms (floor, room, rname) values (4, 3, 'Lannister');
+insert into MeetingRooms (floor, room, rname) values (4, 4, 'Tyrell');
+insert into MeetingRooms (floor, room, rname) values (4, 5, 'Targaryen');
+insert into MeetingRooms (floor, room, rname) values (4, 6, 'Martell');
+insert into MeetingRooms (floor, room, rname) values (5, 1, 'Fire');
+insert into MeetingRooms (floor, room, rname) values (5, 2, 'Light');
+insert into MeetingRooms (floor, room, rname) values (5, 3, 'Earth');
+insert into MeetingRooms (floor, room, rname) values (5, 4, 'Wind');
+insert into MeetingRooms (floor, room, rname) values (5, 5, 'Water');
+insert into MeetingRooms (floor, room, rname) values (5, 6, 'Darkness');
+insert into MeetingRooms (floor, room, rname) values (6, 1, 'Skywalker');
+
+insert into LocatedIn (floor, room, did) values (1, 1, 1);
+insert into LocatedIn (floor, room, did) values (1, 2, 1);
+insert into LocatedIn (floor, room, did) values (1, 3, 2);
+insert into LocatedIn (floor, room, did) values (1, 4, 2);
+insert into LocatedIn (floor, room, did) values (1, 5, 3);
+insert into LocatedIn (floor, room, did) values (1, 6, 3);
+insert into LocatedIn (floor, room, did) values (2, 1, 4);
+insert into LocatedIn (floor, room, did) values (2, 2, 4);
+insert into LocatedIn (floor, room, did) values (2, 3, 4);
+insert into LocatedIn (floor, room, did) values (2, 4, 5);
+insert into LocatedIn (floor, room, did) values (2, 5, 5);
+insert into LocatedIn (floor, room, did) values (3, 1, 6);
+insert into LocatedIn (floor, room, did) values (3, 2, 6);
+insert into LocatedIn (floor, room, did) values (3, 3, 6);
+insert into LocatedIn (floor, room, did) values (3, 4, 7);
+insert into LocatedIn (floor, room, did) values (3, 5, 7);
+insert into LocatedIn (floor, room, did) values (4, 1, 8);
+insert into LocatedIn (floor, room, did) values (4, 2, 8);
+insert into LocatedIn (floor, room, did) values (4, 3, 9);
+insert into LocatedIn (floor, room, did) values (4, 4, 9);
+insert into LocatedIn (floor, room, did) values (4, 5, 9);
+insert into LocatedIn (floor, room, did) values (5, 1, 10);
+insert into LocatedIn (floor, room, did) values (5, 2, 10);
+insert into LocatedIn (floor, room, did) values (5, 3, 10);
+insert into LocatedIn (floor, room, did) values (5, 4, 11);
+insert into LocatedIn (floor, room, did) values (5, 5, 11);
+insert into LocatedIn (floor, room, did) values (6, 1, 12);
+
+insert into Sessions (time, date, floor, room) values ('10:00:00', '2022-10-17', 5, 5);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-16', 1, 3);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-20', 1, 1);
+insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-19', 3, 5);
+insert into Sessions (time, date, floor, room) values ('10:00:00', '2022-10-16', 4, 5);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-22', 1, 1);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-20', 4, 3);
+insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-22', 1, 2);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-23', 3, 1);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-24', 4, 5);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-18', 3, 1);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-22', 4, 2);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-23', 3, 3);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-18', 1, 5);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-18', 4, 5);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-16', 2, 1);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-21', 5, 5);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-21', 1, 3);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-18', 3, 2);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-21', 4, 4);
+insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-24', 1, 5);
+insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-22', 2, 1);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-16', 5, 4);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-17', 4, 2);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-23', 1, 3);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-20', 1, 5);
+insert into Sessions (time, date, floor, room) values ('12:00:00', '2022-10-20', 3, 1);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-21', 5, 4);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-18', 3, 4);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-16', 1, 2);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-17', 3, 3);
+insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-22', 3, 1);
+insert into Sessions (time, date, floor, room) values ('10:00:00', '2022-10-21', 5, 4);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-16', 1, 4);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-18', 2, 3);
+insert into Sessions (time, date, floor, room) values ('12:00:00', '2022-10-21', 2, 4);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-21', 4, 1);
+insert into Sessions (time, date, floor, room) values ('12:00:00', '2022-10-23', 1, 2);
+insert into Sessions (time, date, floor, room) values ('12:00:00', '2022-10-16', 4, 3);
+insert into Sessions (time, date, floor, room) values ('10:00:00', '2022-10-22', 1, 4);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-18', 1, 2);
+insert into Sessions (time, date, floor, room) values ('14:00:00', '2022-10-19', 5, 5);
+insert into Sessions (time, date, floor, room) values ('15:00:00', '2022-10-19', 3, 4);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-19', 1, 4);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-17', 4, 3);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-18', 4, 4);
+insert into Sessions (time, date, floor, room) values ('16:00:00', '2022-10-24', 2, 4);
+insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-21', 3, 5);
+
+-- for testing
+insert into sessions (time, date, floor, room) values ('16:00:00', '2021-10-02', 2, 1);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2021-10-02', 2, 2);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2021-10-02', 2, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2021-10-02', 2, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2021-10-02', 2, 3);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2021-10-02', 2, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2021-10-02', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2021-10-02', 4, 1);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2021-10-02', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2021-10-02', 4, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2021-10-02', 4, 2);
+
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-26', 2, 2);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-26', 2, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-26', 2, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-26', 2, 3);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-26', 2, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-26', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-26', 4, 1);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-26', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-26', 4, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-26', 4, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-26', 4, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 2, 2);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 2, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-28', 2, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 2, 3);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 2, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 4, 1);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-28', 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', '2022-10-28', 4, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', '2022-10-28', 4, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', '2022-10-28', 4, 3);
+
+insert into sessions (time, date, floor, room) values ('16:00:00', current_date + 1, 2, 1);
+insert into sessions (time, date, floor, room) values ('16:00:00', current_date + 1, 2, 2);
+insert into sessions (time, date, floor, room) values ('17:00:00', current_date + 1, 2, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', current_date + 1, 2, 2);
+insert into sessions (time, date, floor, room) values ('16:00:00', current_date + 1, 2, 3);
+insert into sessions (time, date, floor, room) values ('17:00:00', current_date + 1, 2, 3);
+insert into sessions (time, date, floor, room) values ('16:00:00', current_date + 1, 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', current_date + 1, 4, 1);
+insert into sessions (time, date, floor, room) values ('18:00:00', current_date + 1, 4, 1);
+insert into sessions (time, date, floor, room) values ('17:00:00', current_date + 1, 4, 2);
+insert into sessions (time, date, floor, room) values ('18:00:00', current_date + 1, 4, 2);
+
+insert into WorksIn (eid, did) values (1, 2);
+insert into WorksIn (eid, did) values (2, 10);
+insert into WorksIn (eid, did) values (3, 12);
+insert into WorksIn (eid, did) values (4, 1);
+insert into WorksIn (eid, did) values (5, 9);
+insert into WorksIn (eid, did) values (6, 12);
+insert into WorksIn (eid, did) values (7, 2);
+insert into WorksIn (eid, did) values (8, 2);
+insert into WorksIn (eid, did) values (9, 8);
+insert into WorksIn (eid, did) values (10, 6);
+insert into WorksIn (eid, did) values (11, 3);
+insert into WorksIn (eid, did) values (12, 8);
+insert into WorksIn (eid, did) values (13, 9);
+insert into WorksIn (eid, did) values (14, 5);
+insert into WorksIn (eid, did) values (15, 2);
+insert into WorksIn (eid, did) values (16, 9);
+insert into WorksIn (eid, did) values (17, 8);
+insert into WorksIn (eid, did) values (18, 8);
+insert into WorksIn (eid, did) values (19, 5);
+insert into WorksIn (eid, did) values (20, 6);
+insert into WorksIn (eid, did) values (21, 2);
+insert into WorksIn (eid, did) values (22, 12);
+insert into WorksIn (eid, did) values (23, 8);
+insert into WorksIn (eid, did) values (24, 5);
+insert into WorksIn (eid, did) values (25, 5);
+insert into WorksIn (eid, did) values (26, 12);
+insert into WorksIn (eid, did) values (27, 11);
+insert into WorksIn (eid, did) values (28, 7);
+insert into WorksIn (eid, did) values (29, 11);
+insert into WorksIn (eid, did) values (30, 2);
+insert into WorksIn (eid, did) values (31, 11);
+insert into WorksIn (eid, did) values (32, 9);
+insert into WorksIn (eid, did) values (33, 9);
+insert into WorksIn (eid, did) values (34, 1);
+insert into WorksIn (eid, did) values (35, 11);
+insert into WorksIn (eid, did) values (36, 10);
+insert into WorksIn (eid, did) values (37, 10);
+insert into WorksIn (eid, did) values (38, 12);
+insert into WorksIn (eid, did) values (39, 2);
+insert into WorksIn (eid, did) values (40, 3);
+insert into WorksIn (eid, did) values (41, 2);
+insert into WorksIn (eid, did) values (42, 4);
+insert into WorksIn (eid, did) values (43, 4);
+insert into WorksIn (eid, did) values (44, 11);
+insert into WorksIn (eid, did) values (45, 6);
+insert into WorksIn (eid, did) values (46, 12);
+insert into WorksIn (eid, did) values (47, 3);
+insert into WorksIn (eid, did) values (48, 6);
+insert into WorksIn (eid, did) values (49, 7);
+insert into WorksIn (eid, did) values (50, 10);
+insert into WorksIn (eid, did) values (51, 8);
+insert into WorksIn (eid, did) values (52, 2);
+insert into WorksIn (eid, did) values (53, 2);
+insert into WorksIn (eid, did) values (54, 5);
+insert into WorksIn (eid, did) values (55, 9);
+insert into WorksIn (eid, did) values (56, 3);
+insert into WorksIn (eid, did) values (57, 2);
+insert into WorksIn (eid, did) values (58, 3);
+insert into WorksIn (eid, did) values (59, 4);
+insert into WorksIn (eid, did) values (60, 2);
+insert into WorksIn (eid, did) values (61, 11);
+insert into WorksIn (eid, did) values (62, 10);
+insert into WorksIn (eid, did) values (63, 8);
+insert into WorksIn (eid, did) values (64, 7);
+insert into WorksIn (eid, did) values (65, 11);
+insert into WorksIn (eid, did) values (66, 10);
+insert into WorksIn (eid, did) values (67, 3);
+insert into WorksIn (eid, did) values (68, 6);
+insert into WorksIn (eid, did) values (69, 3);
+insert into WorksIn (eid, did) values (70, 7);
+insert into WorksIn (eid, did) values (71, 5);
+insert into WorksIn (eid, did) values (72, 5);
+insert into WorksIn (eid, did) values (73, 5);
+insert into WorksIn (eid, did) values (74, 12);
+insert into WorksIn (eid, did) values (75, 6);
+insert into WorksIn (eid, did) values (76, 2);
+insert into WorksIn (eid, did) values (77, 1);
+insert into WorksIn (eid, did) values (78, 10);
+insert into WorksIn (eid, did) values (79, 6);
+insert into WorksIn (eid, did) values (80, 8);
+insert into WorksIn (eid, did) values (81, 1);
+insert into WorksIn (eid, did) values (82, 11);
+insert into WorksIn (eid, did) values (83, 11);
+insert into WorksIn (eid, did) values (84, 12);
+insert into WorksIn (eid, did) values (85, 1);
+insert into WorksIn (eid, did) values (86, 5);
+insert into WorksIn (eid, did) values (87, 2);
+insert into WorksIn (eid, did) values (88, 9);
+insert into WorksIn (eid, did) values (89, 8);
+insert into WorksIn (eid, did) values (90, 7);
+insert into WorksIn (eid, did) values (91, 12);
+insert into WorksIn (eid, did) values (92, 3);
+insert into WorksIn (eid, did) values (93, 1);
+insert into WorksIn (eid, did) values (94, 8);
+insert into WorksIn (eid, did) values (95, 3);
+insert into WorksIn (eid, did) values (96, 12);
+insert into WorksIn (eid, did) values (97, 5);
+insert into WorksIn (eid, did) values (98, 3);
+insert into WorksIn (eid, did) values (99, 9);
+insert into WorksIn (eid, did) values (100, 10);
+insert into WorksIn (eid, did) values (101, 10);
+insert into WorksIn (eid, did) values (102, 3);
+insert into WorksIn (eid, did) values (103, 9);
+insert into WorksIn (eid, did) values (104, 1);
+insert into WorksIn (eid, did) values (105, 10);
+insert into WorksIn (eid, did) values (106, 10);
+insert into WorksIn (eid, did) values (107, 9);
+insert into WorksIn (eid, did) values (108, 10);
+insert into WorksIn (eid, did) values (109, 2);
+insert into WorksIn (eid, did) values (110, 2);
+insert into WorksIn (eid, did) values (111, 12);
+insert into WorksIn (eid, did) values (112, 8);
+insert into WorksIn (eid, did) values (113, 4);
+insert into WorksIn (eid, did) values (114, 12);
+insert into WorksIn (eid, did) values (115, 2);
+insert into WorksIn (eid, did) values (116, 9);
+insert into WorksIn (eid, did) values (117, 4);
+insert into WorksIn (eid, did) values (118, 12);
+insert into WorksIn (eid, did) values (119, 4);
+insert into WorksIn (eid, did) values (120, 4);
+insert into WorksIn (eid, did) values (121, 6);
+insert into WorksIn (eid, did) values (122, 9);
+insert into WorksIn (eid, did) values (123, 7);
+insert into WorksIn (eid, did) values (124, 7);
+insert into WorksIn (eid, did) values (125, 4);
+insert into WorksIn (eid, did) values (126, 12);
+insert into WorksIn (eid, did) values (127, 11);
+insert into WorksIn (eid, did) values (128, 11);
+insert into WorksIn (eid, did) values (129, 9);
+insert into WorksIn (eid, did) values (130, 12);
+insert into WorksIn (eid, did) values (131, 5);
+insert into WorksIn (eid, did) values (132, 7);
+insert into WorksIn (eid, did) values (133, 11);
+insert into WorksIn (eid, did) values (134, 9);
+insert into WorksIn (eid, did) values (135, 11);
+insert into WorksIn (eid, did) values (136, 6);
+insert into WorksIn (eid, did) values (137, 9);
+insert into WorksIn (eid, did) values (138, 1);
+insert into WorksIn (eid, did) values (139, 3);
+insert into WorksIn (eid, did) values (140, 3);
+insert into WorksIn (eid, did) values (141, 5);
+insert into WorksIn (eid, did) values (142, 5);
+insert into WorksIn (eid, did) values (143, 7);
+insert into WorksIn (eid, did) values (144, 11);
+insert into WorksIn (eid, did) values (145, 3);
+insert into WorksIn (eid, did) values (146, 9);
+insert into WorksIn (eid, did) values (147, 6);
+insert into WorksIn (eid, did) values (148, 10);
+insert into WorksIn (eid, did) values (149, 3);
+insert into WorksIn (eid, did) values (150, 11);
+insert into WorksIn (eid, did) values (151, 10);
+insert into WorksIn (eid, did) values (152, 12);
+insert into WorksIn (eid, did) values (153, 4);
+insert into WorksIn (eid, did) values (154, 3);
+insert into WorksIn (eid, did) values (155, 8);
+insert into WorksIn (eid, did) values (156, 6);
+insert into WorksIn (eid, did) values (157, 7);
+insert into WorksIn (eid, did) values (158, 11);
+insert into WorksIn (eid, did) values (159, 2);
+insert into WorksIn (eid, did) values (160, 6);
+insert into WorksIn (eid, did) values (161, 5);
+insert into WorksIn (eid, did) values (162, 7);
+insert into WorksIn (eid, did) values (163, 9);
+insert into WorksIn (eid, did) values (164, 10);
+insert into WorksIn (eid, did) values (165, 10);
+insert into WorksIn (eid, did) values (166, 5);
+insert into WorksIn (eid, did) values (167, 6);
+insert into WorksIn (eid, did) values (168, 11);
+insert into WorksIn (eid, did) values (169, 9);
+insert into WorksIn (eid, did) values (170, 9);
+insert into WorksIn (eid, did) values (171, 10);
+insert into WorksIn (eid, did) values (172, 11);
+insert into WorksIn (eid, did) values (173, 9);
+insert into WorksIn (eid, did) values (174, 7);
+insert into WorksIn (eid, did) values (175, 8);
+insert into WorksIn (eid, did) values (176, 4);
+insert into WorksIn (eid, did) values (177, 7);
+insert into WorksIn (eid, did) values (178, 11);
+insert into WorksIn (eid, did) values (179, 1);
+insert into WorksIn (eid, did) values (180, 11);
+insert into WorksIn (eid, did) values (181, 7);
+insert into WorksIn (eid, did) values (182, 4);
+insert into WorksIn (eid, did) values (183, 11);
+insert into WorksIn (eid, did) values (184, 8);
+insert into WorksIn (eid, did) values (185, 5);
+insert into WorksIn (eid, did) values (186, 2);
+insert into WorksIn (eid, did) values (187, 3);
+insert into WorksIn (eid, did) values (188, 4);
+insert into WorksIn (eid, did) values (189, 1);
+insert into WorksIn (eid, did) values (190, 10);
+insert into WorksIn (eid, did) values (191, 8);
+insert into WorksIn (eid, did) values (192, 12);
+insert into WorksIn (eid, did) values (193, 5);
+insert into WorksIn (eid, did) values (194, 12);
+insert into WorksIn (eid, did) values (195, 2);
+insert into WorksIn (eid, did) values (196, 9);
+insert into WorksIn (eid, did) values (197, 9);
+insert into WorksIn (eid, did) values (198, 12);
+insert into WorksIn (eid, did) values (199, 2);
+insert into WorksIn (eid, did) values (200, 4);
+insert into WorksIn (eid, did) values (201, 2);
+insert into WorksIn (eid, did) values (202, 6);
+insert into WorksIn (eid, did) values (203, 10);
+insert into WorksIn (eid, did) values (204, 5);
+insert into WorksIn (eid, did) values (205, 2);
+insert into WorksIn (eid, did) values (206, 2);
+insert into WorksIn (eid, did) values (207, 10);
+insert into WorksIn (eid, did) values (208, 7);
+insert into WorksIn (eid, did) values (209, 11);
+insert into WorksIn (eid, did) values (210, 1);
+insert into WorksIn (eid, did) values (211, 7);
+insert into WorksIn (eid, did) values (212, 5);
+insert into WorksIn (eid, did) values (213, 8);
+insert into WorksIn (eid, did) values (214, 7);
+insert into WorksIn (eid, did) values (215, 7);
+insert into WorksIn (eid, did) values (216, 1);
+insert into WorksIn (eid, did) values (217, 9);
+insert into WorksIn (eid, did) values (218, 4);
+insert into WorksIn (eid, did) values (219, 5);
+insert into WorksIn (eid, did) values (220, 10);
+insert into WorksIn (eid, did) values (221, 8);
+insert into WorksIn (eid, did) values (222, 7);
+insert into WorksIn (eid, did) values (223, 2);
+insert into WorksIn (eid, did) values (224, 6);
+insert into WorksIn (eid, did) values (225, 12);
+insert into WorksIn (eid, did) values (226, 7);
+insert into WorksIn (eid, did) values (227, 2);
+insert into WorksIn (eid, did) values (228, 12);
+insert into WorksIn (eid, did) values (229, 9);
+insert into WorksIn (eid, did) values (230, 6);
+insert into WorksIn (eid, did) values (231, 5);
+insert into WorksIn (eid, did) values (232, 3);
+insert into WorksIn (eid, did) values (233, 6);
+insert into WorksIn (eid, did) values (234, 9);
+insert into WorksIn (eid, did) values (235, 12);
+insert into WorksIn (eid, did) values (236, 8);
+insert into WorksIn (eid, did) values (237, 6);
+insert into WorksIn (eid, did) values (238, 10);
+insert into WorksIn (eid, did) values (239, 6);
+insert into WorksIn (eid, did) values (240, 3);
+insert into WorksIn (eid, did) values (241, 11);
+insert into WorksIn (eid, did) values (242, 10);
+insert into WorksIn (eid, did) values (243, 4);
+insert into WorksIn (eid, did) values (244, 12);
+insert into WorksIn (eid, did) values (245, 5);
+insert into WorksIn (eid, did) values (246, 11);
+insert into WorksIn (eid, did) values (247, 11);
+insert into WorksIn (eid, did) values (248, 11);
+insert into WorksIn (eid, did) values (249, 6);
+insert into WorksIn (eid, did) values (250, 10);
+insert into WorksIn (eid, did) values (251, 9);
+insert into WorksIn (eid, did) values (252, 7);
+insert into WorksIn (eid, did) values (253, 5);
+insert into WorksIn (eid, did) values (254, 1);
+insert into WorksIn (eid, did) values (255, 7);
+insert into WorksIn (eid, did) values (256, 3);
+insert into WorksIn (eid, did) values (257, 8);
+insert into WorksIn (eid, did) values (258, 3);
+insert into WorksIn (eid, did) values (259, 2);
+insert into WorksIn (eid, did) values (260, 3);
+insert into WorksIn (eid, did) values (261, 3);
+insert into WorksIn (eid, did) values (262, 1);
+insert into WorksIn (eid, did) values (263, 8);
+insert into WorksIn (eid, did) values (264, 11);
+insert into WorksIn (eid, did) values (265, 6);
+insert into WorksIn (eid, did) values (266, 6);
+insert into WorksIn (eid, did) values (267, 11);
+insert into WorksIn (eid, did) values (268, 1);
+insert into WorksIn (eid, did) values (269, 12);
+insert into WorksIn (eid, did) values (270, 1);
+insert into WorksIn (eid, did) values (271, 11);
+insert into WorksIn (eid, did) values (272, 8);
+insert into WorksIn (eid, did) values (273, 9);
+insert into WorksIn (eid, did) values (274, 6);
+insert into WorksIn (eid, did) values (275, 4);
+insert into WorksIn (eid, did) values (276, 6);
+insert into WorksIn (eid, did) values (277, 3);
+insert into WorksIn (eid, did) values (278, 11);
+insert into WorksIn (eid, did) values (279, 3);
+insert into WorksIn (eid, did) values (280, 2);
+insert into WorksIn (eid, did) values (281, 9);
+insert into WorksIn (eid, did) values (282, 1);
+insert into WorksIn (eid, did) values (283, 12);
+insert into WorksIn (eid, did) values (284, 2);
+insert into WorksIn (eid, did) values (285, 1);
+insert into WorksIn (eid, did) values (286, 11);
+insert into WorksIn (eid, did) values (287, 10);
+insert into WorksIn (eid, did) values (288, 5);
+insert into WorksIn (eid, did) values (289, 6);
+insert into WorksIn (eid, did) values (290, 12);
+insert into WorksIn (eid, did) values (291, 1);
+insert into WorksIn (eid, did) values (292, 4);
+insert into WorksIn (eid, did) values (293, 12);
+insert into WorksIn (eid, did) values (294, 7);
+insert into WorksIn (eid, did) values (295, 11);
+insert into WorksIn (eid, did) values (296, 3);
+insert into WorksIn (eid, did) values (297, 2);
+insert into WorksIn (eid, did) values (298, 8);
+insert into WorksIn (eid, did) values (299, 9);
+insert into WorksIn (eid, did) values (300, 10);
+insert into WorksIn (eid, did) values (301, 1);
+insert into WorksIn (eid, did) values (302, 2);
+insert into WorksIn (eid, did) values (303, 3);
+insert into WorksIn (eid, did) values (304, 4);
+insert into WorksIn (eid, did) values (305, 5);
+insert into WorksIn (eid, did) values (306, 6);
+insert into WorksIn (eid, did) values (307, 7);
+insert into WorksIn (eid, did) values (308, 8);
+insert into WorksIn (eid, did) values (309, 9);
+insert into WorksIn (eid, did) values (310, 10);
+
+insert into Updates (eid, date, new_cap, floor, room) values (301, '2019-10-15', 11, 1, 1);
+insert into Updates (eid, date, new_cap, floor, room) values (301, '2019-10-15', 15, 1, 2);
+insert into Updates (eid, date, new_cap, floor, room) values (302, '2019-10-15', 16, 1, 3);
+insert into Updates (eid, date, new_cap, floor, room) values (297, '2019-10-15', 21, 1, 4);
+insert into Updates (eid, date, new_cap, floor, room) values (296, '2019-10-15', 25, 1, 5);
+insert into Updates (eid, date, new_cap, floor, room) values (296, '2019-10-15', 12, 1, 6);
+insert into Updates (eid, date, new_cap, floor, room) values (292, '2019-10-15', 10, 2, 1);
+insert into Updates (eid, date, new_cap, floor, room) values (292, '2019-10-15', 20, 2, 2);
+insert into Updates (eid, date, new_cap, floor, room) values (292, '2019-10-15', 16, 2, 3);
+insert into Updates (eid, date, new_cap, floor, room) values (305, '2019-10-15', 20, 2, 4);
+insert into Updates (eid, date, new_cap, floor, room) values (305, '2019-10-15', 16, 2, 5);
+insert into Updates (eid, date, new_cap, floor, room) values (306, '2019-10-15', 30, 3, 1);
+insert into Updates (eid, date, new_cap, floor, room) values (306, '2019-10-15', 20, 3, 2);
+insert into Updates (eid, date, new_cap, floor, room) values (306, '2019-10-15', 10, 3, 3);
+insert into Updates (eid, date, new_cap, floor, room) values (307, '2019-10-15', 20, 3, 4);
+insert into Updates (eid, date, new_cap, floor, room) values (307, '2019-10-15', 16, 3, 5);
+insert into Updates (eid, date, new_cap, floor, room) values (298, '2019-10-15', 20, 4, 1);
+insert into Updates (eid, date, new_cap, floor, room) values (298, '2019-10-15', 14, 4, 2);
+insert into Updates (eid, date, new_cap, floor, room) values (299, '2019-10-15', 21, 4, 3);
+insert into Updates (eid, date, new_cap, floor, room) values (299, '2019-10-15', 8, 4, 4);
+insert into Updates (eid, date, new_cap, floor, room) values (299, '2019-10-15', 14, 4, 5);
+insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 10, 5, 1);
+insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 10, 5, 2);
+insert into Updates (eid, date, new_cap, floor, room) values (300, '2019-10-15', 16, 5, 3);
+insert into Updates (eid, date, new_cap, floor, room) values (295, '2019-10-15', 10, 5, 4);
+insert into Updates (eid, date, new_cap, floor, room) values (295, '2019-10-15', 16, 5, 5);
+insert into Updates (eid, date, new_cap, floor, room) values (293, '2019-10-15', 50, 6, 1);
+
+insert into Books (eid, time, date, floor, room) values (261, '10:00:00', '2022-10-16', 4, 5);
+insert into Books (eid, time, date, floor, room) values (271, '11:00:00', '2022-10-16', 1, 3);
+insert into Books (eid, time, date, floor, room) values (251, '10:00:00', '2022-10-17', 5, 5);
+insert into Books (eid, time, date, floor, room) values (264, '13:00:00', '2022-10-19', 3, 5);
+insert into Books (eid, time, date, floor, room) values (293, '14:00:00', '2022-10-20', 1, 1);
+insert into Books (eid, time, date, floor, room) values (291, '15:00:00', '2022-10-22', 1, 1);
+insert into Books (eid, time, date, floor, room) values (271, '13:00:00', '2022-10-22', 1, 2);
+insert into Books (eid, time, date, floor, room) values (299, '16:00:00', '2022-10-23', 3, 1);
+insert into Books (eid, time, date, floor, room) values (309, '12:00:00', '2022-10-16', 4, 3);
+insert into Books (eid, time, date, floor, room) values (295, '14:00:00', '2022-10-16', 5, 4);
+insert into Books (eid, time, date, floor, room) values (302, '15:00:00', '2022-10-16', 1, 4);
+insert into Books (eid, time, date, floor, room) values (251, '16:00:00', '2022-10-16', 1, 2);
+insert into Books (eid, time, date, floor, room) values (300, '11:00:00', '2022-10-17', 3, 3);
+insert into Books (eid, time, date, floor, room) values (310, '11:00:00', '2022-10-18', 3, 4);
+insert into Books (eid, time, date, floor, room) values (305, '16:00:00', '2022-10-19', 1, 4);
+
+insert into Joins (eid, time, date, floor, room) values (251, '10:00:00', '2022-10-17', 5, 5);
+insert into Joins (eid, time, date, floor, room) values (271, '11:00:00', '2022-10-16', 1, 3);
+insert into Joins (eid, time, date, floor, room) values (293, '14:00:00', '2022-10-20', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (264, '13:00:00', '2022-10-19', 3, 5);
+insert into Joins (eid, time, date, floor, room) values (261, '10:00:00', '2022-10-16', 4, 5);
+insert into Joins (eid, time, date, floor, room) values (291, '15:00:00', '2022-10-22', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (271, '13:00:00', '2022-10-22', 1, 2);
+insert into Joins (eid, time, date, floor, room) values (299, '16:00:00', '2022-10-23', 3, 1);
+insert into Joins (eid, time, date, floor, room) values (309, '12:00:00', '2022-10-16', 4, 3);
+insert into Joins (eid, time, date, floor, room) values (295, '14:00:00', '2022-10-16', 5, 4);
+insert into Joins (eid, time, date, floor, room) values (302, '15:00:00', '2022-10-16', 1, 4);
+insert into Joins (eid, time, date, floor, room) values (251, '16:00:00', '2022-10-16', 1, 2);
+insert into Joins (eid, time, date, floor, room) values (300, '11:00:00', '2022-10-17', 3, 3);
+insert into Joins (eid, time, date, floor, room) values (310, '11:00:00', '2022-10-18', 3, 4);
+insert into Joins (eid, time, date, floor, room) values (305, '16:00:00', '2022-10-19', 1, 4);
+
+insert into Joins (eid, time, date, floor, room) values (215, '10:00:00', '2022-10-17', 5, 5);
+insert into Joins (eid, time, date, floor, room) values (123, '11:00:00', '2022-10-16', 1, 3);
+insert into Joins (eid, time, date, floor, room) values (74, '14:00:00', '2022-10-20', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (216, '10:00:00', '2022-10-16', 4, 5);
+insert into Joins (eid, time, date, floor, room) values (65, '15:00:00', '2022-10-22', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (34, '15:00:00', '2022-10-22', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (54, '10:00:00', '2022-10-17', 5, 5);
+insert into Joins (eid, time, date, floor, room) values (64, '16:00:00', '2022-10-23', 3, 1);
+
+insert into Joins (eid, time, date, floor, room) values (13, '11:00:00', '2022-10-16', 1, 3);
+insert into Joins (eid, time, date, floor, room) values (174, '14:00:00', '2022-10-20', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (124, '13:00:00', '2022-10-19', 3, 5);
+insert into Joins (eid, time, date, floor, room) values (116, '10:00:00', '2022-10-16', 4, 5);
+insert into Joins (eid, time, date, floor, room) values (165, '15:00:00', '2022-10-22', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (154, '10:00:00', '2022-10-17', 5, 5);
+insert into Joins (eid, time, date, floor, room) values (145, '13:00:00', '2022-10-22', 1, 2);
+insert into Joins (eid, time, date, floor, room) values (164, '16:00:00', '2022-10-23', 3, 1);
+
+insert into Joins (eid, time, date, floor, room) values (115, '10:00:00', '2022-10-17', 5, 5);
+insert into Joins (eid, time, date, floor, room) values (23, '11:00:00', '2022-10-16', 1, 3);
+insert into Joins (eid, time, date, floor, room) values (274, '14:00:00', '2022-10-20', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (224, '13:00:00', '2022-10-19', 3, 5);
+insert into Joins (eid, time, date, floor, room) values (119, '10:00:00', '2022-10-16', 4, 5);
+insert into Joins (eid, time, date, floor, room) values (265, '15:00:00', '2022-10-22', 1, 1);
+insert into Joins (eid, time, date, floor, room) values (254, '10:00:00', '2022-10-17', 5, 5);
+insert into Joins (eid, time, date, floor, room) values (245, '13:00:00', '2022-10-22', 1, 2);
+insert into Joins (eid, time, date, floor, room) values (264, '16:00:00', '2022-10-23', 3, 1);
+
+
+insert into Approves (eid, time, date, floor, room) values (295, '10:00:00', '2022-10-17', 5, 5);
+insert into Approves (eid, time, date, floor, room) values (297, '11:00:00', '2022-10-16', 1, 3);
+insert into Approves (eid, time, date, floor, room) values (291, '14:00:00', '2022-10-20', 1, 1);
+insert into Approves (eid, time, date, floor, room) values (294, '13:00:00', '2022-10-19', 3, 5);
+insert into Approves (eid, time, date, floor, room) values (299, '10:00:00', '2022-10-16', 4, 5);
+insert into Approves (eid, time, date, floor, room) values (301, '13:00:00', '2022-10-22', 1, 2);
+insert into Approves (eid, time, date, floor, room) values (306, '16:00:00', '2022-10-23', 3, 1);
+insert into Approves (eid, time, date, floor, room) values (309, '12:00:00', '2022-10-16', 4, 3);
+insert into Approves (eid, time, date, floor, room) values (295, '14:00:00', '2022-10-16', 5, 4);
+insert into Approves (eid, time, date, floor, room) values (302, '15:00:00', '2022-10-16', 1, 4);
