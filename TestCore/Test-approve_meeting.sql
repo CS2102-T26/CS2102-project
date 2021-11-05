@@ -5,8 +5,8 @@ insert into Sessions (time, date, floor, room) values ('13:00:00', '2022-10-24',
 CALL book_room(4, 5, '2022-10-24', '10:00:00', '13:00:00', 261); 
 
 -- EXPECTED FAIL - meeting does not exist
-CALL approve_meeting(4, 5, '2022-10-24', '08:00:00', '09:00:00', 294);
-SELECT * FROM approves WHERE eid = 294;
+CALL approve_meeting(4, 5, '2022-10-24', '08:00:00', '09:00:00', 299);
+SELECT * FROM approves WHERE eid = 299;
 
 -- EXPECTED FAIL - manager not qualified to approve
 CALL approve_meeting(4, 5, '2022-10-24', '10:00:00', '13:00:00', 297);
