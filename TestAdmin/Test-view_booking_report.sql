@@ -1,3 +1,8 @@
+CALL book_room(4, 1, '2022-10-26', '16:00:00', '17:00:00', 298); -- manager
+CALL book_room(4, 1, '2022-10-26', '17:00:00', '18:00:00', 252); -- senior
+CALL book_room(2, 2, '2022-10-26', '18:00:00', '19:00:00', 298); -- manager
+CALL book_room(4, 1, '2022-10-28', '17:00:00', '18:00:00', 298); -- manager
+
 -- Expected pass (All bookings after date showed; all unapproved)
 select * from view_booking_report('2022-10-25', 298);
 
