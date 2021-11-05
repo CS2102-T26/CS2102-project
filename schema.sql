@@ -100,7 +100,7 @@ CREATE TABLE Sessions (
     floor INTEGER,
     room INTEGER,
     PRIMARY KEY (time, date, floor, room),
-    FOREIGN KEY (floor, room) REFERENCES MeetingRooms
+    FOREIGN KEY (floor, room) REFERENCES MeetingRooms (floor, room) ON DELETE CASCADE
 );
 
 CREATE TABLE Joins (
