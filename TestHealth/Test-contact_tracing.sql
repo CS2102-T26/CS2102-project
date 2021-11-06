@@ -1,6 +1,6 @@
 -- EXPECTED TO SHOW ALL THESE EMPLOYEES (except 291 and 261)
 insert into Sessions (time, date, floor, room) values ('10:00:00', '2022-10-22', 4, 5);
-insert into Books (eid, time, date, floor, room) values (261, '10:00:00', '2022-10-22', 4, 5);
+CALL book_room(4, 5, '2022-10-22', '10:00:00', '11:00:00', 261); 
 insert into Joins (eid, time, date, floor, room) values (13, '10:00:00', '2022-10-22', 4, 5);
 insert into Joins (eid, time, date, floor, room) values (174, '10:00:00', '2022-10-22', 4, 5);
 insert into Joins (eid, time, date, floor, room) values (124, '10:00:00', '2022-10-22', 4, 5);

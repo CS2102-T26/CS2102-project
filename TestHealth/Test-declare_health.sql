@@ -37,7 +37,7 @@ insert into Joins (eid, time, date, floor, room) values (17, '13:00:00', '2022-1
 insert into Joins (eid, time, date, floor, room) values (221, '13:00:00', '2022-10-31', 4, 5);
 insert into Joins (eid, time, date, floor, room) values (13, '13:00:00', '2022-10-31', 4, 5);
 
--- 1, 4, 1, 4 entries respectively
+-- 5, 1, 5, 1 entries respectively
 select * from joins where time = '12:00:00' and date = '2022-10-31' and floor = 4 and room = 5;
 select * from books where time = '12:00:00' and date = '2022-10-31' and floor = 4 and room = 5;
 select * from joins where time = '13:00:00' and date = '2022-10-31' and floor = 4 and room = 5;
