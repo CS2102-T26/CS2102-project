@@ -1,3 +1,5 @@
+DELETE FROM approves WHERE eid = 299;
+
 insert into Sessions (time, date, floor, room) values ('10:00:00', '2022-10-24', 4, 5);
 insert into Sessions (time, date, floor, room) values ('11:00:00', '2022-10-24', 4, 5);
 insert into Sessions (time, date, floor, room) values ('12:00:00', '2022-10-24', 4, 5);
