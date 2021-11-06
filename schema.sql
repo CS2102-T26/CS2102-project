@@ -1,6 +1,59 @@
 DROP TABLE IF EXISTS Employees, WorksIn, Departments, MeetingRooms, LocatedIn, Juniors, 
 Bookers, Seniors, Managers, Updates, HealthDeclaration, Sessions, Joins, Books, Approves CASCADE;
 
+DROP FUNCTION IF EXISTS 
+remove_bookings_over_capacity(), 
+remove_from_future_records(), 
+check_if_resigned(), 
+check_time_clash_before_join(),
+check_capacity_before_join(), 
+check_if_join_not_in_approves(), 
+check_if_in_books(), 
+check_if_leave_not_in_approves(), 
+check_if_booker_left(),
+delete_from_approves(), 
+delete_from_joins(), 
+check_if_approver_same_did(), 
+is_junior(checked_eid INTEGER), 
+is_senior(checked_eid INTEGER), 
+is_manager(checked_eid INTEGER), 
+is_booker(checked_eid INTEGER), 
+is_manager_of_dept(checked_eid INTEGER, checked_floor INTEGER, checked_room INTEGER),
+check_if_jr_or_mgr(), 
+check_if_sr_or_mgr(), 
+check_if_sr_or_jr(), 
+check_if_can_book(), 
+check_if_mgr_of_dept(), 
+remove_on_fever(), 
+check_for_fever(),
+remove_contacted_employees_on_fever(), 
+search_room(IN search_capacity INT, IN search_date DATE, IN start_hour TIME, IN end_hour TIME), 
+contact_tracing(employee_id INTEGER), 
+non_compliance(IN start_date DATE, IN end_date DATE), 
+view_booking_report(IN start_date DATE, IN input_eid INTEGER), 
+view_future_meeting(IN start_date DATE, IN input_eid INTEGER), 
+view_manager_report(IN start_date DATE, IN input_eid INTEGER) 
+CASCADE;
+
+DROP PROCEDURE IF EXISTS 
+add_department(did INTEGER, dname TEXT), 
+remove_department(input_did INTEGER), 
+add_room(floor INTEGER, room INTEGER, rname TEXT, new_cap INTEGER, eid INTEGER, did INTEGER, date DATE), 
+change_capacity(IN manager_id INT, IN floor_number INT, IN room_number INT, IN capacity INT, IN new_date DATE), 
+add_employee(IN e_name TEXT, IN e_home_number VARCHAR(15), IN e_mobile_number VARCHAR(15),
+    IN e_office_number VARCHAR(15), IN e_type TEXT, IN e_did INT), 
+remove_employee(IN e_id INT, IN last_date DATE), 
+book_room(IN floor_number INT, IN room_number INT, IN book_date DATE, 
+    IN start_hour TIME, IN end_hour TIME, IN booker_eid INT),
+unbook_room(IN floor_number INT, IN room_number INT, IN book_date DATE,
+    IN start_hour TIME, IN end_hour TIME, IN unbooker_eid INT), 
+join_meeting(floor_number INTEGER, room_number INTEGER, join_date DATE, 
+    start_time TIME, end_time TIME, joiner_eid INTEGER), 
+leave_meeting(floor INTEGER, room INTEGER, date DATE, start_time TIME, end_time TIME, eid INTEGER), 
+approve_meeting(floor INTEGER, room INTEGER, date DATE, start_time TIME, end_time TIME, eid INTEGER), 
+declare_health(employee_id INTEGER, declared_date DATE, declared_temperature NUMERIC) 
+CASCADE;
+
 CREATE TABLE Employees (
     eid SERIAL, -- to get auto increment
     ename TEXT,
