@@ -621,6 +621,11 @@ CREATE TRIGGER remove_contacted_employees_on_fever
 AFTER INSERT OR UPDATE ON HealthDeclaration
 FOR EACH ROW EXECUTE FUNCTION remove_contacted_employees_on_fever();
 
+
+/*
+* PROCEDURES
+*/
+
 -- BASIC
 -- add_department
 CREATE OR REPLACE PROCEDURE add_department 
